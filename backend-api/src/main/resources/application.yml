@@ -1,0 +1,78 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: edupath-backend-api
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/edupath?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${DB_USERNAME:edupath}
+    password: ${DB_PASSWORD:edupath_dev_password}
+    driver-class-name: ${DB_DRIVER:com.mysql.cj.jdbc.Driver}
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    baseline-on-migrate: true
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    default-property-inclusion: non_null
+  mail:
+    host: ${MAIL_HOST:smtp.qq.com}
+    port: ${MAIL_PORT:465}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          ssl:
+            enable: ${MAIL_SSL_ENABLE:true}
+          starttls:
+            enable: ${MAIL_STARTTLS_ENABLE:false}
+
+management:
+  health:
+    mail:
+      enabled: ${MAIL_HEALTH_ENABLED:${EMAIL_ENABLED:false}}
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+edupath:
+  ai-service-base-url: ${AI_SERVICE_BASE_URL:http://localhost:8000}
+  ai:
+    connect-timeout-millis: ${AI_CONNECT_TIMEOUT_MILLIS:700}
+    read-timeout-millis: ${AI_READ_TIMEOUT_MILLIS:120000}
+    resource-task-timeout-seconds: ${AI_RESOURCE_TASK_TIMEOUT_SECONDS:180}
+    resource-task-poll-millis: ${AI_RESOURCE_TASK_POLL_MILLIS:250}
+  demo-task-delay-millis: ${DEMO_TASK_DELAY_MILLIS:120}
+  demo-mode:
+    enabled: ${DEMO_MODE_ENABLED:true}
+    class-name: ${DEMO_CLASS_NAME:测试2班}
+  kb:
+    max-upload-bytes: ${KB_MAX_UPLOAD_BYTES:20971520}
+  jwt:
+    secret: ${JWT_SECRET:dev-change-me-edupath-jwt-secret}
+    issuer: ${JWT_ISSUER:edupath}
+    ttl-seconds: ${JWT_TTL_SECONDS:86400}
+    refresh-ttl-seconds: ${JWT_REFRESH_TTL_SECONDS:604800}
+  storage:
+    provider: ${STORAGE_PROVIDER:local}
+    bucket: ${OSS_BUCKET:edupath-demo}
+    endpoint: ${OSS_ENDPOINT:}
+    key-prefix: ${OSS_KEY_PREFIX:edupath}
+    local-root: ${LOCAL_STORAGE_ROOT:storage}
+    access-key-id: ${OSS_ACCESS_KEY_ID:}
+    access-key-secret: ${OSS_ACCESS_KEY_SECRET:}
+    signing-secret: ${STORAGE_SIGNING_SECRET:dev-edupath-storage-signing-secret}
+    lifecycle-days: ${STORAGE_LIFECYCLE_DAYS:30}
+  email:
+    enabled: ${EMAIL_ENABLED:false}
+    from: ${MAIL_FROM:${MAIL_USERNAME:}}
+    from-name: ${MAIL_FROM_NAME:知径 EduPath}

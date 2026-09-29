@@ -1,0 +1,171 @@
+version: 1
+courses:
+  - id: 1
+    code: data_structures_algorithms
+    name: 数据结构与算法
+    knowledge_points:
+      - id: 11
+        name: 线性表
+        aliases: [顺序表, 链表]
+      - id: 12
+        name: 栈与队列
+        aliases: [栈, 队列, 单调栈]
+      - id: 13
+        name: 树与二叉树
+        required: false
+      - id: 131
+        parent_id: 13
+        name: 二叉树递归遍历
+        aliases: [前序遍历, 中序遍历, 后序遍历]
+      - id: 132
+        parent_id: 13
+        name: 二叉搜索树
+        aliases: [BST, 平衡树]
+      - id: 133
+        parent_id: 13
+        name: 堆与优先队列
+        aliases: [大根堆, 小根堆]
+      - id: 14
+        name: 图算法
+        required: false
+      - id: 141
+        parent_id: 14
+        name: 图的遍历
+        aliases: [DFS, BFS, 深度优先, 广度优先]
+      - id: 142
+        parent_id: 14
+        name: 最短路径
+        aliases: [Dijkstra, Bellman-Ford, Floyd]
+      - id: 15
+        name: 排序与查找
+        required: false
+      - id: 151
+        parent_id: 15
+        name: 排序算法
+        aliases: [快速排序, 归并排序, 堆排序]
+      - id: 152
+        parent_id: 15
+        name: 查找与散列表
+        aliases: [二分查找, 哈希表, Hash]
+      - id: 16
+        name: 递归与分治
+        aliases: [递归, 分治法]
+      - id: 17
+        name: 动态规划
+        aliases: [DP, 状态转移]
+      - id: 18
+        name: 算法复杂度分析
+        aliases: [时间复杂度, 空间复杂度, 渐进分析]
+      - id: 19
+        name: 贪心算法
+        aliases: [Greedy, Huffman, 最小生成树, Prim, Kruskal]
+      - id: 20
+        name: 基础与蛮力算法
+        aliases: [Brute Force, Exhaustive Search, TSP]
+      - id: 201
+        parent_id: 20
+        name: 密码学与 RSA
+        aliases: [RSA, 公钥密码, 模运算]
+        required: false
+
+  - id: 2
+    code: computer_organization
+    name: 计算机组成原理
+    knowledge_points:
+      - id: 21
+        name: 数据表示
+        required: false
+      - id: 211
+        parent_id: 21
+        name: 数值编码与补码
+        aliases: [原码, 反码, 补码, 定点数]
+      - id: 212
+        parent_id: 21
+        name: 浮点数表示
+        aliases: [IEEE 754, 阶码, 尾数]
+      - id: 22
+        name: 运算器
+        required: false
+      - id: 221
+        parent_id: 22
+        name: 运算器与算术运算
+        aliases: [ALU, 加法器, 乘除法]
+      - id: 222
+        parent_id: 22
+        name: 布尔代数与逻辑门
+        aliases: [Boolean Algebra, Logic Gates, K-map]
+      - id: 223
+        parent_id: 22
+        name: 组合逻辑电路
+        aliases: [Decoder, Multiplexer, Adder, Combinational Circuit]
+      - id: 224
+        parent_id: 22
+        name: 时序逻辑电路
+        aliases: [Flip-Flop, Counter, Shift Register, Sequential Circuit]
+      - id: 225
+        parent_id: 22
+        name: 半导体与 CMOS 电路
+        aliases: [PN Junction, MOSFET, CMOS, Transistor]
+      - id: 23
+        name: 指令系统
+        required: false
+      - id: 231
+        parent_id: 23
+        name: 指令编码与寻址方式
+        aliases: [指令格式, 寻址方式, ISA]
+      - id: 232
+        parent_id: 23
+        name: 汇编语言与寄存器
+        aliases: [Assembly, Register, x86, MOV, Stack Pointer]
+      - id: 24
+        name: CPU 与流水线
+        required: false
+      - id: 241
+        parent_id: 24
+        name: CPU 数据通路与控制
+        aliases: [数据通路, 控制器, 微程序]
+      - id: 242
+        parent_id: 24
+        name: 流水线与冒险
+        aliases: [数据冒险, 控制冒险, 转发]
+      - id: 25
+        name: 存储系统与 Cache
+        required: false
+      - id: 251
+        parent_id: 25
+        name: Cache 映射方式
+        aliases: [直接映射, 全相联, 组相联]
+      - id: 252
+        parent_id: 25
+        name: 虚拟存储器
+        aliases: [页表, TLB, 缺页]
+      - id: 253
+        parent_id: 25
+        name: 存储层次结构
+        aliases: [主存, 局部性, 命中率]
+      - id: 254
+        parent_id: 25
+        name: 存储器技术与非易失存储
+        aliases: [SRAM, DRAM, Flash, FPGA, Magnetic Disk]
+      - id: 26
+        name: I/O 系统
+        required: false
+      - id: 261
+        parent_id: 26
+        name: 中断与 DMA
+        aliases: [程序中断, DMA, 通道]
+      - id: 262
+        parent_id: 26
+        name: 数字 I/O
+        aliases: [Digital I/O, I/O Port, Peripheral]
+        required: false
+      - id: 27
+        name: 总线系统
+        aliases: [总线仲裁, 同步总线, 异步总线]
+      - id: 28
+        name: 计算机性能评价
+        aliases: [CPI, MIPS, 加速比, Amdahl]
+      - id: 29
+        name: 综合练习与考试题
+        aliases: [Class Test, Practice Exam, Worked Solution]
+        required: false

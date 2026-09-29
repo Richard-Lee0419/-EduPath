@@ -1,0 +1,77 @@
+{
+  "baseline_version": "2026-07-15-v1",
+  "evaluator_version": "resource-quality-v1",
+  "cases": [
+    {
+      "case_id": "grounded_basic_lecture",
+      "resource": {
+        "title": "二叉树递归遍历基础讲义",
+        "resource_type": "lecture",
+        "content": "## 学习目标\n理解二叉树递归遍历的定义。\n## 分步讲解\n先判断边界，再访问结点并递归处理子树。\n## 边界例题\n空树直接返回。\n## RAG 证据\n以上结论来自 [chunk_tree_001]。",
+        "difficulty": "basic",
+        "knowledge_points": ["二叉树递归遍历"],
+        "evidence_chunk_ids": ["chunk_tree_001"]
+      },
+      "evidence": [
+        {
+          "chunk_id": "chunk_tree_001",
+          "title": "二叉树递归遍历",
+          "content": "递归遍历先处理空树边界，再按遍历顺序访问根结点和子树。",
+          "knowledge_point": "二叉树递归遍历"
+        }
+      ],
+      "safety": {"passed": true, "risk_level": "low", "confidence": 0.95},
+      "expected_difficulty": "basic",
+      "expected": {"total_score": 96.35, "grade": "A", "gate_passed": true}
+    },
+    {
+      "case_id": "grounded_medium_codelab",
+      "resource": {
+        "title": "Cache 地址映射实验",
+        "resource_type": "codelab",
+        "content": "## 实验任务\n完成 Cache 地址映射的迁移练习。\n## 运行方式\n```python\nprint('tag index offset')\n```\n## 预期输出\ntag index offset\n## 观察任务\n比较字段变化。\n## 边界测试\n检查最大组号。\n## RAG 证据\n依据 [chunk_cache_001]。",
+        "difficulty": "medium",
+        "knowledge_points": ["Cache 地址映射"],
+        "evidence_chunk_ids": ["chunk_cache_001"]
+      },
+      "evidence": [
+        {
+          "chunk_id": "chunk_cache_001",
+          "title": "Cache 地址映射",
+          "content": "主存地址通常划分为标记、组索引和块内偏移字段。",
+          "knowledge_point": "Cache 地址映射"
+        }
+      ],
+      "safety": {"passed": true, "risk_level": "low", "confidence": 0.9},
+      "expected_difficulty": "medium",
+      "expected": {"total_score": 99.7, "grade": "A", "gate_passed": true}
+    },
+    {
+      "case_id": "unsafe_ungrounded_quiz",
+      "resource": {
+        "title": "临时练习",
+        "resource_type": "quiz",
+        "content": "问题：任选一个答案，不需要依据课程材料。",
+        "difficulty": "advanced",
+        "knowledge_points": ["归并排序"],
+        "evidence_chunk_ids": []
+      },
+      "evidence": [
+        {
+          "chunk_id": "chunk_sort_001",
+          "title": "归并排序",
+          "content": "归并排序采用分治思想，并在线性时间内合并两个有序序列。",
+          "knowledge_point": "归并排序"
+        }
+      ],
+      "safety": {
+        "passed": false,
+        "risk_level": "medium",
+        "confidence": 0.8,
+        "issues": ["内容缺少课程证据支持"]
+      },
+      "expected_difficulty": "basic",
+      "expected": {"total_score": 27.4, "grade": "D", "gate_passed": false}
+    }
+  ]
+}

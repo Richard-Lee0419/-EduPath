@@ -1,0 +1,80 @@
+services:
+  frontend:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    env_file:
+      - .env.example
+    environment:
+      VITE_API_BASE_URL: http://localhost:8080/api
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+    depends_on:
+      - backend-api
+
+  backend-api:
+    image: maven:3.9-eclipse-temurin-17
+    working_dir: /app
+    command: mvn spring-boot:run
+    env_file:
+      - .env.example
+    environment:
+      SERVER_PORT: 8080
+      AI_SERVICE_BASE_URL: http://ai-agent-service:8000
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend-api:/app
+    depends_on:
+      - mysql
+      - redis
+      - ai-agent-service
+
+  ai-agent-service:
+    image: python:3.12-slim
+    working_dir: /app
+    command: sh -c "pip install -e '.[dev,vector]' && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    env_file:
+      - .env.example
+    environment:
+      VECTOR_STORE_PROVIDER: chroma
+      CHROMA_URL: http://chroma:8000
+      CHROMA_COLLECTION: edupath_course_chunks
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./ai-agent-service:/app
+    depends_on:
+      - redis
+      - chroma
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: edupath
+      MYSQL_USER: edupath
+      MYSQL_PASSWORD: edupath_dev_password
+      MYSQL_ROOT_PASSWORD: edupath_root_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  chroma:
+    image: chromadb/chroma:latest
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma-data:/chroma/chroma
+
+volumes:
+  mysql-data:
+  chroma-data:

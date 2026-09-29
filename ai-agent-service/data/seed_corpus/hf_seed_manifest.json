@@ -1,0 +1,20 @@
+{
+  "generated_at": "2026-06-15T00:00:00Z",
+  "embedding_model": "BAAI/bge-m3",
+  "download_status": "blocked_network",
+  "documents_written": 0,
+  "corpus_path": "ai-agent-service/data/seed_corpus/seed_documents.jsonl",
+  "note": "Hugging Face download was attempted from this environment, but connections to huggingface.co timed out. Run scripts/download_hf_seed_corpus.py after network access is available.",
+  "datasets": [
+    "codeparrot/apps",
+    "HuggingFaceFW/fineweb-edu"
+  ],
+  "topics": [
+    "二叉树与递归遍历",
+    "图遍历与最短路径",
+    "动态规划与复杂度分析",
+    "Cache 映射与局部性",
+    "CPU 流水线与冒险",
+    "虚拟存储、页表与 TLB"
+  ]
+}

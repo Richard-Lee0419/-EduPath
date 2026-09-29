@@ -1,0 +1,7 @@
+target
+.mvn
+*.log
+.env
+.env.*
+storage
+.DS_Store

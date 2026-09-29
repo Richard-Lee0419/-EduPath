@@ -1,0 +1,17 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/edupath?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${DB_USERNAME:edupath}
+    password: ${DB_PASSWORD:edupath_dev_password}
+    driver-class-name: ${DB_DRIVER:com.mysql.cj.jdbc.Driver}
+
+edupath:
+  ai-service-base-url: ${AI_SERVICE_BASE_URL:http://localhost:8000}
+  ai:
+    connect-timeout-millis: ${AI_CONNECT_TIMEOUT_MILLIS:700}
+    read-timeout-millis: ${AI_READ_TIMEOUT_MILLIS:120000}
+  storage:
+    provider: ${STORAGE_PROVIDER:local}
+    local-root: ${LOCAL_STORAGE_ROOT:storage}
+    access-key-id: ${OSS_ACCESS_KEY_ID:}
+    access-key-secret: ${OSS_ACCESS_KEY_SECRET:}

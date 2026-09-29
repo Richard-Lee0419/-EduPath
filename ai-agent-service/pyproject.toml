@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "edupath-ai-agent-service"
+version = "1.0.0-rc.1"
+description = "FastAPI multi-agent service for EduPath"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "pydantic>=2.8.0",
+  "uvicorn[standard]>=0.30.0",
+  "pyyaml>=6.0.0",
+  "pypdf>=4.3.0",
+  "python-docx>=1.1.2",
+  "python-pptx>=1.0.2",
+]
+
+[project.optional-dependencies]
+vector = [
+  "chromadb>=0.5.0,<0.6.0",
+]
+embedding = [
+  "sentence-transformers>=3.0.0,<4.0.0",
+  "transformers>=4.41.0,<4.47.0",
+  "tokenizers>=0.20.0,<=0.20.3",
+]
+dev = [
+  "httpx>=0.27.0",
+  "pytest>=8.3.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["data*", "tests*"]

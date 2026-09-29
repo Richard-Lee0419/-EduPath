@@ -1,0 +1,10 @@
+ARG BASE_IMAGE=edupath/ai-agent-service:latest
+FROM ${BASE_IMAGE}
+
+# Use this image only when pyproject.toml and the runtime image contract are
+# unchanged. Replacing the complete package avoids retaining deleted modules
+# from the base release while reusing its large, already verified ML runtime.
+USER root
+RUN rm -rf /app/app && mkdir -p /app/app && chown edupath:edupath /app/app
+COPY --chown=edupath:edupath app /app/app
+USER edupath

@@ -1,0 +1,235 @@
+version: 1
+cases:
+  - id: dsa-tree-traversal
+    course_id: 1
+    query: 二叉树前序、中序和后序遍历的递归出口是什么
+    expected_knowledge_point_ids: [131]
+    top_k: 3
+  - id: dsa-tree-stack
+    course_id: 1
+    query: 递归遍历二叉树时如何理解调用栈和返回时机
+    expected_knowledge_point_ids: [131]
+    top_k: 3
+  - id: dsa-bst-invariant
+    course_id: 1
+    query: 二叉搜索树的有序不变式和中序遍历结果
+    expected_knowledge_point_ids: [132]
+    top_k: 3
+  - id: dsa-bst-delete
+    course_id: 1
+    query: BST 删除有两个孩子的节点时如何处理
+    expected_knowledge_point_ids: [132]
+    top_k: 3
+  - id: dsa-graph-traversal
+    course_id: 1
+    query: DFS 使用栈而 BFS 使用队列的区别
+    expected_knowledge_point_ids: [141]
+    top_k: 3
+  - id: dsa-unweighted-shortest
+    course_id: 1
+    query: 无权图最短路径为什么可以用 BFS
+    expected_knowledge_point_ids: [141, 142]
+    top_k: 3
+  - id: dsa-dijkstra
+    course_id: 1
+    query: 非负权图应该选择 Dijkstra 还是 Bellman-Ford
+    expected_knowledge_point_ids: [142]
+    top_k: 3
+  - id: dsa-negative-edge
+    course_id: 1
+    query: 图中存在负权边时如何检测负环
+    expected_knowledge_point_ids: [142]
+    top_k: 3
+  - id: co-cache-mapping
+    course_id: 2
+    query: Cache 直接映射、全相联和组相联有什么区别
+    expected_knowledge_point_ids: [251]
+    top_k: 3
+  - id: co-cache-address
+    course_id: 2
+    query: Cache 地址中的标记、索引和块内偏移
+    expected_knowledge_point_ids: [251]
+    top_k: 3
+  - id: co-tlb
+    course_id: 2
+    query: TLB 如何降低页表地址转换开销
+    expected_knowledge_point_ids: [252]
+    top_k: 3
+  - id: co-page-fault
+    course_id: 2
+    query: 虚拟存储发生缺页异常后需要做什么
+    expected_knowledge_point_ids: [252]
+    top_k: 3
+  - id: co-pipeline-hazards
+    course_id: 2
+    query: CPU 流水线的数据冒险、结构冒险和控制冒险
+    expected_knowledge_point_ids: [242]
+    top_k: 3
+  - id: co-pipeline-forwarding
+    course_id: 2
+    query: 暂停、转发和分支预测分别解决什么流水线问题
+    expected_knowledge_point_ids: [242]
+    top_k: 3
+  - id: co-complement
+    course_id: 2
+    query: 有符号整数为什么使用补码以及如何判断溢出
+    expected_knowledge_point_ids: [211]
+    top_k: 3
+  - id: co-fixed-point
+    course_id: 2
+    query: 定点数的小数点位置由什么决定
+    expected_knowledge_point_ids: [211]
+    top_k: 3
+  - id: dsa-linked-list-insert
+    course_id: 1
+    query: How does inserting a new node at the head of a linked list work?
+    expected_knowledge_point_ids: [11]
+    top_k: 5
+  - id: dsa-circular-queue
+    course_id: 1
+    query: Circular queue enqueue dequeue wraparound front rear full condition
+    expected_knowledge_point_ids: [12]
+    top_k: 5
+  - id: dsa-heap-array
+    course_id: 1
+    query: Heap array representation parent child indices bubble up sift down
+    expected_knowledge_point_ids: [133]
+    expected_source_contains: heaps-and-heapsort
+    top_k: 5
+  - id: dsa-heapsort
+    course_id: 1
+    query: max heap swap root last item reduces effective heap size restores heap property
+    expected_knowledge_point_ids: [133, 151]
+    expected_source_contains: heaps-and-heapsort
+    top_k: 5
+  - id: dsa-quicksort-partition
+    course_id: 1
+    query: Quicksort pivot partition loop invariant and recursive calls
+    expected_knowledge_point_ids: [151, 16]
+    top_k: 5
+  - id: dsa-merge-sort
+    course_id: 1
+    query: Merge sort divide conquer merge procedure recurrence complexity
+    expected_knowledge_point_ids: [151, 16, 18]
+    top_k: 5
+  - id: dsa-hash-collision
+    course_id: 1
+    query: Hash table direct addressing collisions chaining and load factor
+    expected_knowledge_point_ids: [152]
+    top_k: 5
+  - id: dsa-recursion-base-case
+    course_id: 1
+    query: Recursive factorial base case call stack and return values
+    expected_knowledge_point_ids: [16]
+    top_k: 5
+  - id: dsa-dynamic-programming
+    course_id: 1
+    query: Dynamic programming overlapping subproblems optimal substructure memoization tabulation
+    expected_knowledge_point_ids: [17]
+    top_k: 5
+  - id: dsa-lcs
+    course_id: 1
+    query: Longest common subsequence recurrence and dynamic programming table
+    expected_knowledge_point_ids: [17]
+    top_k: 5
+  - id: dsa-big-o
+    course_id: 1
+    query: Big O Big Omega asymptotic order of growth worst case analysis
+    expected_knowledge_point_ids: [18]
+    top_k: 5
+  - id: dsa-greedy-huffman
+    course_id: 1
+    query: Greedy choice property optimal substructure and Huffman codes
+    expected_knowledge_point_ids: [19]
+    top_k: 5
+  - id: dsa-minimum-spanning-tree
+    course_id: 1
+    query: Compare Prim and Kruskal algorithms for a minimum spanning tree
+    expected_knowledge_point_ids: [19, 141]
+    top_k: 5
+  - id: dsa-brute-force-tsp
+    course_id: 1
+    query: Brute force exhaustive search for the traveling salesman problem
+    expected_knowledge_point_ids: [20]
+    top_k: 5
+  - id: dsa-rsa
+    course_id: 1
+    query: RSA public key private key modular arithmetic encryption process
+    expected_knowledge_point_ids: [201]
+    top_k: 5
+  - id: co-ieee754
+    course_id: 2
+    query: IEEE 754 floating point sign exponent mantissa normalization
+    expected_knowledge_point_ids: [212]
+    top_k: 5
+  - id: co-adder
+    course_id: 2
+    query: Half adder full adder carry propagation and arithmetic circuit
+    expected_knowledge_point_ids: [221, 223]
+    top_k: 5
+  - id: co-boolean-kmap
+    course_id: 2
+    query: Simplify a Boolean function using logic gates theorems and Karnaugh map
+    expected_knowledge_point_ids: [222]
+    top_k: 5
+  - id: co-decoder-multiplexer
+    course_id: 2
+    query: Decoder multiplexer combinational building block truth table
+    expected_knowledge_point_ids: [223]
+    top_k: 5
+  - id: co-flip-flop-counter
+    course_id: 2
+    query: Flip flop counter shift register sequential circuit clock state
+    expected_knowledge_point_ids: [224]
+    top_k: 5
+  - id: co-cmos
+    course_id: 2
+    query: PN junction MOSFET NMOS PMOS CMOS inverter operation
+    expected_knowledge_point_ids: [225]
+    top_k: 5
+  - id: co-addressing-modes
+    course_id: 2
+    query: x86 assembly instruction addressing modes labels offsets directives
+    expected_knowledge_point_ids: [231, 232]
+    top_k: 5
+  - id: co-registers
+    course_id: 2
+    query: CPU registers accumulator program counter stack pointer index register
+    expected_knowledge_point_ids: [232]
+    top_k: 5
+  - id: co-cpu-datapath
+    course_id: 2
+    query: CPU architecture datapath registers ALU control and instruction execution
+    expected_knowledge_point_ids: [241]
+    top_k: 5
+  - id: co-memory-hierarchy
+    course_id: 2
+    query: Memory hierarchy compare registers cache SRAM DRAM main memory access speed
+    expected_knowledge_point_ids: [253, 254]
+    top_k: 5
+  - id: co-flash
+    course_id: 2
+    query: Flash RAM nonvolatile memory floating gate FPGA memory technology
+    expected_knowledge_point_ids: [254]
+    top_k: 5
+  - id: co-interrupt
+    course_id: 2
+    query: Types of x86 interrupts and interrupt service routine
+    expected_knowledge_point_ids: [261, 29]
+    top_k: 5
+  - id: co-bus
+    course_id: 2
+    query: Address bus data bus control bus timing contention and daisy chaining
+    expected_knowledge_point_ids: [27]
+    top_k: 5
+  - id: co-performance-risc-cisc
+    course_id: 2
+    query: Compare RISC and CISC instruction execution performance and pipelining
+    expected_knowledge_point_ids: [28, 242]
+    top_k: 5
+  - id: co-practice-exam
+    course_id: 2
+    query: Parts a to d refer to the assembly listing shown below labels instructions assembler directives comments offsets
+    expected_knowledge_point_ids: [29]
+    expected_source_contains: Practice Exam Souliton.pdf
+    top_k: 5

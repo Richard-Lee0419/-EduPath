@@ -1,0 +1,75 @@
+# macOS
+.DS_Store
+
+# Environment
+.env
+.env.*
+!.env.example
+!.env.*.example
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.*.example
+.env.local
+*.local
+# Local real-model credentials (template remains tracked).
+ai-agent-service/.env.real-model.local
+
+# Logs
+*.log
+logs/
+.run/
+
+# Node
+node_modules/
+dist/
+coverage/
+
+# Java
+target/
+.mvn/wrapper/maven-wrapper.jar
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+build/
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+
+# Generated data
+data/mysql/
+data/redis/
+data/chroma/
+backend-api/storage/
+uploads/
+
+# Private courseware and local-only corpus variants
+ai-agent-service/data/course_corpus/source_documents/**/*.pdf
+ai-agent-service/data/course_corpus/source_documents/**/*.pptx
+ai-agent-service/data/course_corpus/source_documents/**/*.docx
+ai-agent-service/data/course_corpus/material_inventory.json
+ai-agent-service/data/seed_corpus/seed_documents.private.jsonl
+
+# Historical local-course inventories and derived notes are not licensed for public redistribution.
+ai-agent-service/data/course_corpus/catalog.yaml
+ai-agent-service/data/course_corpus/coverage_report.json
+ai-agent-service/data/course_corpus/material_processing_report.json
+ai-agent-service/data/course_corpus/retrieval_evaluation.json
+ai-agent-service/data/course_corpus/source_documents/derived_notes/
+
+# Historical submission-only helpers; the public repository uses the production checks instead.
+scripts/build-competition-package.ps1
+scripts/release-readiness.ps1
+
+# Local browser and document-rendering artifacts
+.playwright-cli/
+tmp/
+
+# Generated Software Cup release candidates
+output/competition-release/

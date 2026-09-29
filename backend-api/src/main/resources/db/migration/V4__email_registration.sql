@@ -1,0 +1,5 @@
+ALTER TABLE users ADD COLUMN email VARCHAR(255) NULL;
+ALTER TABLE users ADD COLUMN email_verified BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN email_verification_sent_at TIMESTAMP NULL;
+
+CREATE UNIQUE INDEX idx_users_email ON users(email);

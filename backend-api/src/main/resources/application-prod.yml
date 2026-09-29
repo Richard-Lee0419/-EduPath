@@ -1,0 +1,27 @@
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: ${DB_DRIVER:com.mysql.cj.jdbc.Driver}
+
+edupath:
+  ai-service-base-url: ${AI_SERVICE_BASE_URL}
+  demo-mode:
+    enabled: ${DEMO_MODE_ENABLED:false}
+  ai:
+    connect-timeout-millis: ${AI_CONNECT_TIMEOUT_MILLIS:1500}
+    read-timeout-millis: ${AI_READ_TIMEOUT_MILLIS:120000}
+  kb:
+    max-upload-bytes: ${KB_MAX_UPLOAD_BYTES:20971520}
+  jwt:
+    secret: ${JWT_SECRET}
+  storage:
+    provider: ${STORAGE_PROVIDER:oss}
+    bucket: ${OSS_BUCKET}
+    endpoint: ${OSS_ENDPOINT}
+    key-prefix: ${OSS_KEY_PREFIX:edupath}
+    access-key-id: ${OSS_ACCESS_KEY_ID}
+    access-key-secret: ${OSS_ACCESS_KEY_SECRET}
+    signing-secret: ${STORAGE_SIGNING_SECRET}
+    lifecycle-days: ${STORAGE_LIFECYCLE_DAYS:30}

@@ -1,0 +1,158 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: /api
+        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org/}
+    image: edupath/frontend:${EDUPATH_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    depends_on:
+      backend-api:
+        condition: service_healthy
+
+  backend-api:
+    build:
+      context: ./backend-api
+      args:
+        MAVEN_MIRROR_URL: ${MAVEN_MIRROR_URL:-https://repo.maven.apache.org/maven2}
+    image: edupath/backend-api:${EDUPATH_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: 8080
+      AI_SERVICE_BASE_URL: http://ai-agent-service:8000
+      DB_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-edupath}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      DB_USERNAME: ${MYSQL_USER:-edupath}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-86400}
+      JWT_REFRESH_TTL_SECONDS: ${JWT_REFRESH_TTL_SECONDS:-604800}
+      AI_CONNECT_TIMEOUT_MILLIS: ${AI_CONNECT_TIMEOUT_MILLIS:-1500}
+      AI_READ_TIMEOUT_MILLIS: ${AI_READ_TIMEOUT_MILLIS:-120000}
+      AI_RESOURCE_TASK_TIMEOUT_SECONDS: ${AI_RESOURCE_TASK_TIMEOUT_SECONDS:-180}
+      AI_RESOURCE_TASK_POLL_MILLIS: ${AI_RESOURCE_TASK_POLL_MILLIS:-250}
+      KB_MAX_UPLOAD_BYTES: ${KB_MAX_UPLOAD_BYTES:-20971520}
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-oss}
+      STORAGE_SIGNING_SECRET: ${STORAGE_SIGNING_SECRET}
+      STORAGE_LIFECYCLE_DAYS: ${STORAGE_LIFECYCLE_DAYS:-30}
+      OSS_BUCKET: ${OSS_BUCKET}
+      OSS_ENDPOINT: ${OSS_ENDPOINT}
+      OSS_KEY_PREFIX: ${OSS_KEY_PREFIX:-edupath}
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET}
+      EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
+      MAIL_HOST: ${MAIL_HOST:-smtp.qq.com}
+      MAIL_PORT: ${MAIL_PORT:-465}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-知径 EduPath}
+      MAIL_SSL_ENABLE: ${MAIL_SSL_ENABLE:-true}
+      MAIL_STARTTLS_ENABLE: ${MAIL_STARTTLS_ENABLE:-false}
+    expose:
+      - "8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      ai-agent-service:
+        condition: service_healthy
+
+  ai-agent-service:
+    build:
+      context: ./ai-agent-service
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        TORCH_VERSION: ${TORCH_VERSION:-2.5.1+cpu}
+        TORCH_EXTRA_INDEX_URL: ${TORCH_EXTRA_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+    image: edupath/ai-agent-service:${EDUPATH_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      EDUPATH_ENV: prod
+      VECTOR_STORE_PROVIDER: chroma
+      CHROMA_URL: http://chroma:8000
+      CHROMA_COLLECTION: ${CHROMA_COLLECTION:-edupath_course_chunks}
+      ANONYMIZED_TELEMETRY: "false"
+      LLM_PROVIDER: ${LLM_PROVIDER}
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_MODEL: ${LLM_MODEL}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-90}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-2}
+      LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-8192}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.2}
+      AGENT_TASK_WORKERS: ${AGENT_TASK_WORKERS:-2}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_STRICT: ${EMBEDDING_STRICT:-true}
+      EMBEDDING_CACHE_DIR: ${EMBEDDING_CACHE_DIR:-/tmp/edupath-embeddings}
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-}
+      HF_ENDPOINT: ${HF_ENDPOINT:-}
+      EDUPATH_SEED_CORPUS_PATH: /runtime-course-corpus/seed_documents.jsonl
+      MAX_INGEST_BYTES: ${MAX_INGEST_BYTES:-20971520}
+    volumes:
+      - embedding-cache:${EMBEDDING_CACHE_DIR:-/tmp/edupath-embeddings}
+      - ${EDUPATH_COURSE_CORPUS_DIR:-./ai-agent-service/data/seed_corpus}:/runtime-course-corpus:ro
+    expose:
+      - "8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: ${AI_HEALTH_START_PERIOD:-300s}
+    depends_on:
+      chroma:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.4
+    platform: ${MYSQL_PLATFORM:-linux/amd64}
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-edupath}
+      MYSQL_USER: ${MYSQL_USER:-edupath}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql-prod-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  chroma:
+    image: chromadb/chroma:0.5.23
+    restart: unless-stopped
+    environment:
+      ANONYMIZED_TELEMETRY: "false"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/heartbeat', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    volumes:
+      - chroma-prod-data:/chroma/chroma
+
+volumes:
+  mysql-prod-data:
+  chroma-prod-data:
+  embedding-cache:

@@ -1,0 +1,13 @@
+services:
+  backend-api:
+    environment:
+      DB_URL: ${EXTERNAL_DB_URL:-jdbc:mysql://host.docker.internal:${EXTERNAL_DB_PORT:-3306}/${MYSQL_DATABASE:-edupath}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on: !override
+      ai-agent-service:
+        condition: service_healthy
+
+  mysql:
+    profiles:
+      - compose-db
