@@ -4,11 +4,15 @@
 
 这是软件杯 A3 团队项目的个人公开版本，由团队快照整理后持续维护。Richard-Lee0419 主要负责前端/UI与 AI 模块，并参与后端；部署主要由队友完成。代码基础、个人扩展和代表性提交见 [贡献说明](CONTRIBUTIONS.md)。
 
-**快速入口：** [核心流程视频](docs/evidence/core-learning-flow.webm) · [演示说明](docs/demo-guide.md) · [验证记录](docs/validation-report.md) · [设计取舍](docs/engineering-decisions.md) · [原在线实例](https://8.136.194.87/)
+**快速入口：** [核心流程视频](docs/evidence/core-learning-flow.webm) · [演示说明](docs/demo-guide.md) · [验证记录](docs/validation-report.md) · [设计取舍](docs/engineering-decisions.md) · [原在线实例](https://8.136.194.87/) · [旧版介绍存档](docs/history/README-before-portfolio-review.md)
 
 > 视频来自本仓库本地代码，使用合成账号和确定性开发模式，实际执行网页操作与跨服务请求。原在线实例可能与仓库版本不同。小规模真实模型验证中，画像通过，讲义因本次较低输出上限导致 JSON 截断，详见验证记录。项目没有已验证的学习成绩提升或正式用户研究结论。
 
 ![本地浏览器生成的三类资源](docs/evidence/demo-resource-package.png)
+
+## 解决的问题
+
+课程学习常常不是缺少资料，而是缺少与个人基础相匹配的资料和清晰的学习顺序。EduPath 以可修正的学习画像记录目标、薄弱点、偏好与时间预算，用课程知识库约束内容生成，再让测验结果回流画像与路径，避免一次性推荐之后学习状态不再变化。
 
 ## 核心流程与当前范围
 
@@ -124,7 +128,7 @@ python -m pytest
 
 浏览器验证与重新录制见 [演示说明](docs/demo-guide.md)，执行 `npm run test:e2e` 或 `npm run test:e2e:record`。本地已通过两项无接口 mock 的浏览器测试；视频覆盖学生流程，教师拒绝上传由另一项测试验证。
 
-本次收尾在 [草稿 PR #1](https://github.com/Richard-Lee0419/-EduPath/pull/1) 中；未合并或部署。README 的成果对应此版本，原在线实例不自动代表它。
+本次收尾与合并记录见 [PR #1](https://github.com/Richard-Lee0419/-EduPath/pull/1)。README 的成果对应此版本；本轮没有部署线上实例，原在线实例不自动代表它。优化前的完整介绍及当时的技术文档入口保留在 [旧版介绍存档](docs/history/README-before-portfolio-review.md)，提交历史继续保留。
 
 已知边界：
 

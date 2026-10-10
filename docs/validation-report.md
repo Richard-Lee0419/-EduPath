@@ -1,6 +1,6 @@
 # 公开版本验证记录
 
-验证日期：2026-10-10 至 2026-10-11（Asia/Shanghai）。本地实现、测试和录像已提交于 [`a0dea72`](https://github.com/Richard-Lee0419/-EduPath/commit/a0dea7288af58728146ef95a708957816ddad722)，基于公开主分支 `b0007c063126cdca8e2ef4b970386592d925bc53`。对象不是原团队版本或线上实例；收尾改动公开在 [草稿 PR #1](https://github.com/Richard-Lee0419/-EduPath/pull/1)，未合并 main 或部署。
+验证日期：2026-10-10 至 2026-10-11（Asia/Shanghai）。本地实现、测试和录像已提交于 [`a0dea72`](https://github.com/Richard-Lee0419/-EduPath/commit/a0dea7288af58728146ef95a708957816ddad722)，基于公开主分支 `b0007c063126cdca8e2ef4b970386592d925bc53`。对象不是原团队版本或线上实例；收尾改动和合并状态见 [PR #1](https://github.com/Richard-Lee0419/-EduPath/pull/1)，本轮没有部署线上实例。
 
 本记录区分实际执行、源码检查和未验证项。生成模式、版本变化及通过测试只证明相应工程流程，不证明教学效果或真实模型质量。
 
@@ -162,4 +162,4 @@ bash scripts/ci-learning-flow.sh
 - Tabbit CLI 的初次诊断受本机注册限制；未绕过检查或重启用户浏览器。后续使用项目独立安装的 Playwright Chromium 完成 E2E 与录屏。
 - 真实模型只完成上述两项小样本；真实 embedding 没有运行。不宣称模型准确率、稳定延迟或检索提升。
 - 本次没有创建真实学习效果实验、补造用户反馈或将合成数据视为真实学生。
-- 在线实例可能与该工作区不同；本次仅发布分支和草稿 PR，没有合并或部署，不能把线上的行为当成优化后版本证据。
+- 在线实例可能与该工作区不同；分支验证与合并记录见 PR，本轮没有部署线上实例，不能把线上的行为当成优化后版本证据。
