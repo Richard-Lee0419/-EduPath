@@ -47,13 +47,36 @@ class ChromaVectorStore:
     ) -> list[SearchHit]:
         collection = self._get_collection()
         query_embedding = self.embedding_client.embed_dense(query)
+        requested_points = set(knowledge_point_ids or [])
+        where: dict[str, Any] = {"course_id": course_id}
+        if requested_points:
+            # Filter before ANN ranking: unrelated nearest neighbours must not
+            # consume the whole candidate budget. Existing related IDs are pipe-
+            # encoded metadata, so collect their matching values without changing
+            # the persisted format or requiring old documents to be reindexed.
+            scoped = collection.get(where={"course_id": course_id}, include=["metadatas"])
+            related_values = {
+                str(metadata.get("related_knowledge_point_ids"))
+                for metadata in _first(scoped.get("metadatas"))
+                if metadata and requested_points.intersection(
+                    int(value) for value in str(metadata.get("related_knowledge_point_ids") or "").split("|") if value
+                )
+            }
+            point_filters: list[dict[str, Any]] = [
+                {"knowledge_point_id": {"$in": sorted(requested_points)}}
+            ]
+            if related_values:
+                point_filters.append({"related_knowledge_point_ids": {"$in": sorted(related_values)}})
+            where = {"$and": [
+                {"course_id": course_id},
+                point_filters[0] if len(point_filters) == 1 else {"$or": point_filters},
+            ]}
         result = collection.query(
             query_embeddings=[query_embedding],
             n_results=max(1, min(top_k * 3, 30)),
-            where={"course_id": course_id},
+            where=where,
             include=["documents", "metadatas", "distances"],
         )
-        requested_points = set(knowledge_point_ids or [])
         hits = self._to_hits(result, requested_points)
         hits.sort(key=lambda item: item.score, reverse=True)
         return hits[: max(1, min(top_k, 10))]

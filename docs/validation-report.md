@@ -12,7 +12,7 @@
 | 前端类型 | `npm run type-check` | 通过；知识库响应与页面修改后另行复核 |
 | 前端构建 | `npm run build` | 通过；保留 Mermaid 等 chunk 大于 500 kB 的警告，没有隐藏警告 |
 | Java | `mvn package` | 56 项通过，0 失败、0 错误、0 跳过；包含测试和可运行 JAR 打包 |
-| AI 服务 | `python -m pytest -p no:cacheprovider --basetemp <新的工作区临时目录>` | 77 项通过；1 条 TestClient 弃用警告；仅本地/模拟模型 |
+| AI 服务 | `python -m pytest -p no:cacheprovider --basetemp <新的工作区临时目录>` | 最初 77 项通过；增加实际失败的 Chroma 过滤回归后 82 项通过；1 条 TestClient 弃用警告；仅本地/模拟模型 |
 | 已有模型 smoke 脚本单元检查 | `python -m pytest scripts/tests -p no:cacheprovider` | 1 项通过；不代表运行了真实模型 smoke |
 | 学习闭环 | `scripts/smoke_learning_flow.py` | 真实 Java→Python HTTP，五个业务任务成功；证据见下文 |
 | 知识库生命周期 | `scripts/smoke_knowledge_lifecycle.py` | 真实上传、检索、重建、拒绝和删除；证据见下文 |
@@ -118,8 +118,9 @@ python scripts/smoke_knowledge_lifecycle.py \
 | 列表/详情/下载/交互泄露私人资源、教师越课程访问 | [Java API 回归](../backend-api/src/test/java/com/edupath/BackendApiContractTests.java) |
 | Safety 缺失、字符串布尔或状态矛盾仍写资源 | 同上及 [HTTP Client 回归](../backend-api/src/test/java/com/edupath/ai/AiAgentClientTests.java) |
 | 入库失败记录回滚丢失、重建假成功、删除无撤回确认 | Java API / Client 回归及真实 HTTP 生命周期 |
+| 无关近邻耗尽 Chroma 候选预算，直接/关联知识点无证据 | [Chroma 过滤回归](../ai-agent-service/tests/test_chroma_search_filters.py)；Docker 临时集合 HTTP/ANN 验证 |
 
-新增 Java 13 项、AI 15 项风险回归。测试总数不是质量指标；新增检查针对拒绝、权限、持久化与撤回结果，不是仅确认函数可调用。
+首批新增 Java 13 项、AI 15 项风险回归；远程失败后另补 5 项 Chroma 筛选回归。测试总数不是质量指标；新增检查针对拒绝、权限、持久化、撤回和召回结果，不是仅确认函数可调用。用同一干扰集合对照 `cc4cff5` 的适配器，三组知识点查询均返回 0 条证据；修复后均返回两条正确证据。这是合成场景的缺陷复现，不是检索质量基准。
 
 ## 独立复现与 CI
 
@@ -150,6 +151,8 @@ bash scripts/ci-learning-flow.sh
 脱敏快照见 [CI 汇总](evidence/github-ci.json)、[Docker 学习流程](evidence/docker-learning-flow.json)、[Docker 知识库生命周期](evidence/docker-kb-lifecycle.json)。完整日志、JUnit XML、浏览器报告在上述 run 的 artifacts 中；仓库不复制登录 token 或原始 trace。首轮 Docker 学习脚本的历史通用限制误写“未使用 MySQL/Chroma”；应以其容器上下文与另一个 Chroma 验证记录判断，后续脚本已改为明确记录向量提供方及“数据库类型由外部日志确认”。这属于证据措辞修正，没有改写首轮运行结果。
 
 首轮成功后固定 CI runner 为 Ubuntu 24.04，并更新 artifact action 到已确认存在的 v7，避免 `ubuntu-latest` 即将迁移和 Node 20 弃用提醒；后续运行以 PR 检查为准。开发 Compose 通过不代表生产镜像、OSS、真实 embedding 或线上版本已验证。Flyway 对 MySQL 8.4 的版本提醒和前端 chunk 体积提醒保留。
+
+第二轮 [38068139705](https://github.com/Richard-Lee0419/-EduPath/actions/runs/38068139705)（提交 `cc4cff5`）前端与 backend-ai 通过，但 Docker 在资源任务失败：`KnowledgeAgent did not retrieve course evidence`。代码检查及干扰片段回归重现了“先召回、后过滤”耗尽候选预算的机制。后续把课程/直接及关联知识点筛选移到 Chroma 召回前，保留旧 metadata 格式；本地完整 AI 测试变为 82 项通过，并在 Docker CI 加入 [真实 Chroma 干扰验证](../scripts/smoke_chroma_filters.py)，使用独立临时集合、30 条更相似的无关片段及跨课程片段，核对直接/关联知识点仍召回正确证据后删除集合。该失败没有计为通过；修复后的真实执行结果以 PR 后续检查为准。
 
 ## 仍无法确认的内容
 

@@ -16,6 +16,8 @@ cleanup() {
 trap cleanup EXIT
 docker compose --project-name edupath-ci config --quiet
 docker compose --project-name edupath-ci up --detach --wait --wait-timeout 720
+docker compose --project-name edupath-ci exec -T ai-agent-service python - \
+  <scripts/smoke_chroma_filters.py >output/validation/docker-chroma-filters.json
 ready=false
 for attempt in {1..120}; do
   if curl --fail --silent --max-time 2 http://127.0.0.1:8080/actuator/health >/dev/null \
