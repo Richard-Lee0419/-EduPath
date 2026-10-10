@@ -4,9 +4,9 @@
 
 这是软件杯 A3 团队项目的个人公开版本，由团队快照整理后持续维护。Richard-Lee0419 主要负责前端/UI与 AI 模块，并参与后端；部署主要由队友完成。代码基础、个人扩展和代表性提交见 [贡献说明](CONTRIBUTIONS.md)。
 
-**快速入口：** [核心流程视频](docs/evidence/core-learning-flow.webm) · [演示说明](docs/demo-guide.md) · [验证记录](docs/validation-report.md) · [设计取舍](docs/engineering-decisions.md) · [原在线实例](https://8.136.194.87/) · [旧版介绍存档](docs/history/README-before-portfolio-review.md)
+**快速入口：** [核心流程视频](https://github.com/Richard-Lee0419/-EduPath/releases/download/demo-video-2026-10-11/edupath-demo.mp4) · [演示说明](docs/demo-guide.md) · [验证记录](docs/validation-report.md) · [设计取舍](docs/engineering-decisions.md) · [原在线实例](https://8.136.194.87/) · [旧版介绍存档](docs/history/README-before-portfolio-review.md)
 
-> 视频来自本仓库本地代码，使用合成账号和确定性开发模式，实际执行网页操作与跨服务请求。原在线实例可能与仓库版本不同。小规模真实模型验证中，画像通过，讲义因本次较低输出上限导致 JSON 截断，详见验证记录。项目没有已验证的学习成绩提升或正式用户研究结论。
+> 核心流程视频为作者提供的 3 分钟项目演示（MP4）；确定性开发模式下的自动化录屏另见[演示说明](docs/demo-guide.md)。原在线实例可能与仓库版本不同。小规模真实模型验证中，画像通过，讲义因本次较低输出上限导致 JSON 截断，详见验证记录。项目没有已验证的学习成绩提升或正式用户研究结论。
 
 ![知径 EduPath 学习入口与功能中心](docs/images/learning-home.png)
 
@@ -128,7 +128,7 @@ python -m pytest
 
 [CI 配置](.github/workflows/ci.yml) 执行前端测试/构建、Java/Python 测试、真实 HTTP 与 Chromium 学习闭环、知识库生命周期，并在独立任务中启动开发 Compose 验证 MySQL/Chroma。[修复后的远程检查](https://github.com/Richard-Lee0419/-EduPath/actions/runs/38068948500) 三组全部通过，包括真实 Chroma 的干扰片段回归；此前的检索失败、提交及结果范围见 [验证记录](docs/validation-report.md)。已启动隔离本地服务时，可执行 `python scripts/smoke_learning_flow.py --output output/validation/learning-flow.json`，知识库检查使用 `python scripts/smoke_knowledge_lifecycle.py --confirm-isolated-local`。这些命令创建合成账号或资料，只允许本地 HTTP 地址，勿连接生产数据库。
 
-浏览器验证与重新录制见 [演示说明](docs/demo-guide.md)，执行 `npm run test:e2e` 或 `npm run test:e2e:record`。本地已通过两项无接口 mock 的浏览器测试；视频覆盖学生流程，教师拒绝上传由另一项测试验证。
+浏览器验证与重新录制见 [演示说明](docs/demo-guide.md)，执行 `npm run test:e2e` 或 `npm run test:e2e:record`。本地已通过两项无接口 mock 的浏览器测试；自动化录屏覆盖学生流程，教师拒绝上传由另一项测试验证。
 
 本次收尾与合并记录见 [PR #1](https://github.com/Richard-Lee0419/-EduPath/pull/1)。README 的成果对应此版本；本轮没有部署线上实例，原在线实例不自动代表它。优化前的完整介绍及当时的技术文档入口保留在 [旧版介绍存档](docs/history/README-before-portfolio-review.md)，提交历史继续保留。
 

@@ -5,9 +5,10 @@
 - 在线入口：[https://8.136.194.87/](https://8.136.194.87/)；线上实例可能与本仓库版本不同。
 - 本地准备：[README](../README.md)；推荐先以无密钥开发模式跑通流程。
 - 自动化结果：[验证记录](validation-report.md)。
-- [已录制核心学习流程](evidence/core-learning-flow.webm)：2026-10-11，本地公开版本、Chromium 1440×1000、合成学生账号。影片实际覆盖画像、三类资源及正文/证据、路径、小测、评分与版本更新；没有剪辑或加速等待。
-- 模式为 `deterministic_fallback`，local hash embedding / local vectors，付费模型调用 0。视频不是原在线实例，也不是本次真实模型验证录像。
-- 录像与被验证实现提交于 [`a0dea72`](https://github.com/Richard-Lee0419/-EduPath/commit/a0dea7288af58728146ef95a708957816ddad722)，包含本地录制脚本及断言；[PR #1](https://github.com/Richard-Lee0419/-EduPath/pull/1) 包含后续远程验证证据和合并记录。录像来自提交前同一工作区，没有用线上旧实例替代。
+- [作者提供的核心流程视频](https://github.com/Richard-Lee0419/-EduPath/releases/download/demo-video-2026-10-11/edupath-demo.mp4)：3 分钟 MP4（H.264/AAC），作为 Releases 附件提供下载，原文件未剪辑或转码。下列环境和测试说明针对另行保留的自动化录屏。
+- [自动化学生流程录屏](evidence/core-learning-flow.webm)：2026-10-11，本地公开版本、Chromium 1440×1000、合成学生账号。影片实际覆盖画像、三类资源及正文/证据、路径、小测、评分与版本更新；没有剪辑或加速等待。
+- 自动化录屏模式为 `deterministic_fallback`，local hash embedding / local vectors，付费模型调用 0。它不是原在线实例，也不是本次真实模型验证录像。
+- 自动化录像与被验证实现提交于 [`a0dea72`](https://github.com/Richard-Lee0419/-EduPath/commit/a0dea7288af58728146ef95a708957816ddad722)，包含本地录制脚本及断言；[PR #1](https://github.com/Richard-Lee0419/-EduPath/pull/1) 包含后续远程验证证据和合并记录。录像来自提交前同一工作区，没有用线上旧实例替代。
 
 ## 自动复现与录制
 
