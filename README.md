@@ -120,7 +120,7 @@ python -m pytest
 
 前端资源解析与事件测试验证结果断言；`test:static-contract` 检查源码约定，旧 `test:real-api` 仅是兼容别名，**不发起 HTTP 请求**。Java 测试使用 H2 和模拟 AI，Python 测试包含确定性流程与模拟模型响应，不能替代真实模型或浏览器验证。跨服务流程、环境与本次结果见 [验证记录](docs/validation-report.md)。本项目尚未配置 ESLint，不能把类型检查称为 lint 通过。
 
-[CI 配置](.github/workflows/ci.yml) 执行前端测试/构建、Java/Python 测试、真实 HTTP 与 Chromium 学习闭环、知识库生命周期，并在独立任务中启动开发 Compose 验证 MySQL/Chroma。[已执行的远程检查](https://github.com/Richard-Lee0419/-EduPath/actions/runs/38067679122) 三组全部通过，提交与结果范围见验证记录。已启动隔离本地服务时，可执行 `python scripts/smoke_learning_flow.py --output output/validation/learning-flow.json`，知识库检查使用 `python scripts/smoke_knowledge_lifecycle.py --confirm-isolated-local`。这些命令创建合成账号或资料，只允许本地 HTTP 地址，勿连接生产数据库。
+[CI 配置](.github/workflows/ci.yml) 执行前端测试/构建、Java/Python 测试、真实 HTTP 与 Chromium 学习闭环、知识库生命周期，并在独立任务中启动开发 Compose 验证 MySQL/Chroma。[修复后的远程检查](https://github.com/Richard-Lee0419/-EduPath/actions/runs/38068948500) 三组全部通过，包括真实 Chroma 的干扰片段回归；此前的检索失败、提交及结果范围见 [验证记录](docs/validation-report.md)。已启动隔离本地服务时，可执行 `python scripts/smoke_learning_flow.py --output output/validation/learning-flow.json`，知识库检查使用 `python scripts/smoke_knowledge_lifecycle.py --confirm-isolated-local`。这些命令创建合成账号或资料，只允许本地 HTTP 地址，勿连接生产数据库。
 
 浏览器验证与重新录制见 [演示说明](docs/demo-guide.md)，执行 `npm run test:e2e` 或 `npm run test:e2e:record`。本地已通过两项无接口 mock 的浏览器测试；视频覆盖学生流程，教师拒绝上传由另一项测试验证。
 

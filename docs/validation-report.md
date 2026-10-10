@@ -23,8 +23,8 @@
 | Shell 语法 | Git Bash `bash -n` 检查验证/CI脚本，包括 Docker 启动器 | 通过 |
 | 本地 CI 启动器 | Windows Git Bash `EDUPATH_BROWSER_TESTS=true bash scripts/ci-learning-flow.sh` | 启动新 H2/AI/Vite 服务，两份 HTTP smoke 与 2 项 E2E 均通过，退出 0 |
 | 配置文件 | PyYAML 解析 Compose 与 CI YAML | 通过；不等于 Docker 启动成功或 GitHub Actions 运行成功 |
-| GitHub Actions | [run 38067679122](https://github.com/Richard-Lee0419/-EduPath/actions/runs/38067679122) | 三组通过，提交 `a0dea72`，见下文 |
-| 真实开发 Docker | Ubuntu 24.04 CI 启动 Compose | MySQL 8.4/18 次迁移、Chroma、HTTP 学习闭环和知识库生命周期通过；不等于生产部署 |
+| GitHub Actions | [修复后 run 38068948500](https://github.com/Richard-Lee0419/-EduPath/actions/runs/38068948500) | 三组通过，提交 `2a3b43c`；此前有一次真实检索失败，完整过程见下文 |
+| 真实开发 Docker | Ubuntu 24.04 CI 启动 Compose | MySQL 8.4/18 次迁移、Chroma 干扰片段筛选、HTTP 学习闭环和知识库生命周期通过；不等于生产部署 |
 | 部署文件 | `bash scripts/production-readiness-check.sh` | 文件及静态配置检查通过；不能据此宣称生产就绪 |
 | 缺依赖时失败 | 无 Maven / Docker 的脚本预检 | 返回 1 并提示缺失工具，没有跳过后宣称全部通过 |
 
@@ -152,7 +152,9 @@ bash scripts/ci-learning-flow.sh
 
 首轮成功后固定 CI runner 为 Ubuntu 24.04，并更新 artifact action 到已确认存在的 v7，避免 `ubuntu-latest` 即将迁移和 Node 20 弃用提醒；后续运行以 PR 检查为准。开发 Compose 通过不代表生产镜像、OSS、真实 embedding 或线上版本已验证。Flyway 对 MySQL 8.4 的版本提醒和前端 chunk 体积提醒保留。
 
-第二轮 [38068139705](https://github.com/Richard-Lee0419/-EduPath/actions/runs/38068139705)（提交 `cc4cff5`）前端与 backend-ai 通过，但 Docker 在资源任务失败：`KnowledgeAgent did not retrieve course evidence`。代码检查及干扰片段回归重现了“先召回、后过滤”耗尽候选预算的机制。后续把课程/直接及关联知识点筛选移到 Chroma 召回前，保留旧 metadata 格式；本地完整 AI 测试变为 82 项通过，并在 Docker CI 加入 [真实 Chroma 干扰验证](../scripts/smoke_chroma_filters.py)，使用独立临时集合、30 条更相似的无关片段及跨课程片段，核对直接/关联知识点仍召回正确证据后删除集合。该失败没有计为通过；修复后的真实执行结果以 PR 后续检查为准。
+第二轮 [38068139705](https://github.com/Richard-Lee0419/-EduPath/actions/runs/38068139705)（提交 `cc4cff5`）前端与 backend-ai 通过，但 Docker 在资源任务失败：`KnowledgeAgent did not retrieve course evidence`。代码检查及干扰片段回归重现了“先召回、后过滤”耗尽候选预算的机制。后续把课程/直接及关联知识点筛选移到 Chroma 召回前，保留旧 metadata 格式；本地完整 AI 测试变为 82 项通过，并在 Docker CI 加入 [真实 Chroma 干扰验证](../scripts/smoke_chroma_filters.py)，使用独立临时集合、30 条更相似的无关片段及跨课程片段，核对直接/关联知识点仍召回正确证据后删除集合。该失败没有计为通过。
+
+修复提交 [`2a3b43c`](https://github.com/Richard-Lee0419/-EduPath/commit/2a3b43cced8bc931a45ff1514147af3efac68635) 的 [第三轮 38068948500](https://github.com/Richard-Lee0419/-EduPath/actions/runs/38068948500) 三组全部通过。已下载并核对 JUnit、浏览器报告及容器日志：Java 56 项、AI 82 项、脚本 1 项、前端 29 项和静态契约通过；2 项浏览器测试通过，失败、flaky 与跳过均为 0。真实 Chroma 的三组直接/关联知识点查询均返回两条指定证据，未知知识点返回空、课程隔离及不带知识点查询保持正确，临时集合已删除。随后 Docker 的五个学习任务、画像/路径 1→2 与知识库生命周期再次通过，付费模型调用 0。脱敏结果见 [CI 汇总](evidence/github-ci-chroma-fix.json)、[真实筛选回归](evidence/docker-chroma-filters.json)、[学习闭环](evidence/docker-learning-flow-chroma-fix.json) 和 [知识库生命周期](evidence/docker-kb-lifecycle-chroma-fix.json)。该验证证明本次筛选与工程流程，不能推导语义检索准确率；随后仅整理证据的提交继续由 PR 检查验证。
 
 ## 仍无法确认的内容
 

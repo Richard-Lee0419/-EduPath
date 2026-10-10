@@ -1,0 +1,36 @@
+{
+  "status": "passed",
+  "verified_at_utc": "2026-10-10T16:46:38.027556+00:00",
+  "scope": "real Chroma HTTP/ANN; 30 nearer unrelated fixtures plus direct/related evidence",
+  "stages": [
+    {
+      "knowledge_point_ids": [
+        131
+      ],
+      "returned_chunks": 2,
+      "status": "passed"
+    },
+    {
+      "knowledge_point_ids": [
+        139
+      ],
+      "returned_chunks": 2,
+      "status": "passed"
+    },
+    {
+      "knowledge_point_ids": [
+        131,
+        139
+      ],
+      "returned_chunks": 2,
+      "status": "passed"
+    }
+  ],
+  "unknown_point_rejected": true,
+  "course_only_search_preserved": true,
+  "fixture_collection_removed": true,
+  "model_calls": 0,
+  "limitations": [
+    "synthetic functional regression; not semantic retrieval quality"
+  ]
+}
