@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.rag.chunker import RagChunk
+from app.rag.chunker import RagChunk, uploaded_chunk_id_prefix
 from app.rag.embeddings import EmbeddingClient, cosine_similarity
 
 
@@ -108,6 +108,36 @@ class VectorStore:
 
     def count(self) -> int:
         return len(self._records)
+
+    def delete_document_chunks(self, course_id: int, document_id: int) -> int:
+        owned_ids = [
+            chunk_id for chunk_id, record in self._records.items()
+            if _belongs_to_document(record.chunk, chunk_id, course_id, document_id)
+        ]
+        for chunk_id in owned_ids:
+            del self._records[chunk_id]
+        return len(owned_ids)
+
+    def replace_document_chunks(self, course_id: int, document_id: int, chunks: list[RagChunk]) -> int:
+        removed = self.delete_document_chunks(course_id, document_id)
+        try:
+            self.upsert_chunks(chunks)
+        except Exception as write_error:
+            try:
+                self.delete_document_chunks(course_id, document_id)
+            except Exception as cleanup_error:
+                raise RuntimeError(f"{write_error}；部分向量清理失败：{cleanup_error}") from write_error
+            raise
+        return removed
+
+
+def _belongs_to_document(chunk: RagChunk, chunk_id: str, course_id: int, document_id: int) -> bool:
+    if chunk.course_id != course_id:
+        return False
+    if chunk.document_id is not None:
+        return chunk.document_id == document_id
+    # Compatibility for vectors written before document_id metadata existed.
+    return chunk_id.startswith(uploaded_chunk_id_prefix(document_id))
 
 
 def _indexed_text(chunk: RagChunk) -> str:

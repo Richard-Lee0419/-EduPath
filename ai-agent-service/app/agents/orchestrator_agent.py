@@ -117,10 +117,10 @@ class OrchestratorAgent:
         return self.knowledge_agent.retrieve(course_id, query, top_k, knowledge_point_ids)
 
     def ingest_knowledge_document(self, request: Any, text: str) -> dict[str, object]:
-        planned_agents = ["DocumentParser", "Chunker", "EmbeddingAgent", "KnowledgeAgent", "SafetyAgent"]
+        planned_agents = ["DocumentParser", "Chunker", "SafetyAgent", "EmbeddingAgent", "KnowledgeAgent"]
         course_code = _course_code(request.course_id)
         knowledge_point = request.knowledge_point or request.filename.rsplit(".", 1)[0]
-        chunks = self.knowledge_agent.ingest_uploaded_document(
+        chunks = self.knowledge_agent.prepare_uploaded_document(
             document_id=request.document_id,
             course_id=request.course_id,
             course_code=course_code,
@@ -130,25 +130,61 @@ class OrchestratorAgent:
             content=text,
             source=request.source or f"{course_code}/{request.filename}",
         )
-        safety = self.safety_agent.review(text, chunks, require_evidence=False)
+        chunk_evidence = self.knowledge_agent.uploaded_chunk_evidence(chunks)
+        safety = self.safety_agent.review(text, chunk_evidence, require_evidence=False)
+        safety_status = "passed" if safety.passed else "review_required"
+        index_status = "failed"
+        index_error = ""
+        indexed_evidence: list[RagEvidence] = []
+        if safety.passed:
+            try:
+                self.knowledge_agent.replace_uploaded_chunks(
+                    course_id=request.course_id, document_id=request.document_id, chunks=chunks,
+                )
+            except Exception as exception:
+                index_error = f"向量索引写入失败：{exception}"
+                cleanup_error = self._withdraw_uploaded_chunks(request.course_id, request.document_id)
+                if cleanup_error:
+                    index_error += f"；{cleanup_error}"
+            else:
+                index_status = "indexed"
+                indexed_evidence = chunk_evidence
+        else:
+            # Rejection must also invalidate the document's previously approved version.
+            index_error = self._withdraw_uploaded_chunks(request.course_id, request.document_id)
         task = task_manager.create_task(
             "ai_kb_ingest",
             planned_agents,
             {
                 "document_id": request.document_id,
                 "chunk_count": len(chunks),
-                "safety_status": "passed" if safety.passed else "review_required",
+                "safety_status": safety_status,
+                "index_status": index_status,
+                "index_error": index_error,
             },
+            status="success" if index_status == "indexed" else "failed",
         )
         return {
             "task_id": task["task_id"],
             "task": task,
             "document_id": request.document_id,
             "parse_status": "parsed",
-            "index_status": "indexed",
-            "chunks": [self._knowledge_evidence(item) for item in chunks],
+            "index_status": index_status,
+            "index_error": index_error,
+            "chunks": [self._knowledge_evidence(item) for item in indexed_evidence],
             "safety": safety.model_dump(),
+            "safety_status": safety_status,
         }
+
+    def delete_knowledge_document_vectors(self, *, course_id: int, document_id: int) -> int:
+        return self.knowledge_agent.delete_uploaded_chunks(course_id=course_id, document_id=document_id)
+
+    def _withdraw_uploaded_chunks(self, course_id: int, document_id: int) -> str:
+        try:
+            self.delete_knowledge_document_vectors(course_id=course_id, document_id=document_id)
+        except Exception as exception:
+            return f"历史向量撤回失败：{exception}"
+        return ""
 
     def extract_profile(self, request: ProfileExtractRequest) -> ProfileExtractResponse:
         return self.profile_extraction_pipeline.extract(request)

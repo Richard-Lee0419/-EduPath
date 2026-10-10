@@ -36,11 +36,19 @@ export type KnowledgeSearchResult = {
   results: KnowledgeSearchItem[];
 };
 
+export type KnowledgeDocumentUploadResult = {
+  document_id: number;
+  parse_status: string;
+  index_status: string;
+  safety_status: string | null;
+  index_error: string;
+};
+
 export function uploadKnowledgeDocument(courseId: number, file: File) {
   const formData = new FormData();
   formData.append("courseId", String(courseId));
   formData.append("file", file);
-  return apiUpload<{ document_id: number; parse_status: string }>("/kb/upload", formData);
+  return apiUpload<KnowledgeDocumentUploadResult>("/kb/upload", formData);
 }
 
 export function listKnowledgeDocuments(params: { courseId?: number; status?: string } = {}) {

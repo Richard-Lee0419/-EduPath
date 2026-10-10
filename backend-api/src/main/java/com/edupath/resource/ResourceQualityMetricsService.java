@@ -39,6 +39,7 @@ public class ResourceQualityMetricsService {
                 normalizedFilter(resourceType),
                 normalizedFilter(generationMode),
                 currentStudentOwnerId(),
+                currentCourseManagerId(),
                 since);
         return summarize(rows, courseId, normalizedFilter(resourceType), normalizedFilter(generationMode), normalizedWindow, now);
     }
@@ -228,8 +229,13 @@ public class ResourceQualityMetricsService {
     }
 
     private Long currentStudentOwnerId() {
-        var principal = AuthContext.current();
-        return principal != null && "student".equals(principal.role()) ? principal.userId() : null;
+        var principal = AuthContext.requirePrincipal();
+        return "student".equals(principal.role()) ? principal.userId() : null;
+    }
+
+    private Long currentCourseManagerId() {
+        var principal = AuthContext.requirePrincipal();
+        return "teacher".equals(principal.role()) ? principal.userId() : null;
     }
 
     private String normalizedFilter(String value) {

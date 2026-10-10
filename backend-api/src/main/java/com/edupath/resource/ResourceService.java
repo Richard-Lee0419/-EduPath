@@ -2,7 +2,9 @@ package com.edupath.resource;
 
 import com.edupath.ai.AiAgentClient.AiGeneratedResource;
 import com.edupath.ai.AiAgentClient.AiResourceGenerateResult;
+import com.edupath.ai.AiAgentClient.AiSafety;
 import com.edupath.auth.AuthContext;
+import com.edupath.auth.UserRepository;
 import com.edupath.common.ExternalServiceException;
 import com.edupath.course.CourseCatalogService;
 import com.edupath.learning.LearningEventService;
@@ -29,16 +31,19 @@ public class ResourceService {
     private final ObjectStorageService objectStorageService;
     private final ResourceRepository resourceRepository;
     private final LearningEventService learningEventService;
+    private final UserRepository userRepository;
 
     public ResourceService(
             CourseCatalogService courseCatalogService,
             ObjectStorageService objectStorageService,
             ResourceRepository resourceRepository,
-            LearningEventService learningEventService) {
+            LearningEventService learningEventService,
+            UserRepository userRepository) {
         this.courseCatalogService = courseCatalogService;
         this.objectStorageService = objectStorageService;
         this.resourceRepository = resourceRepository;
         this.learningEventService = learningEventService;
+        this.userRepository = userRepository;
     }
 
     public ResourceListResponse listResources(Integer courseId, String type, int page, int size) {
@@ -49,37 +54,27 @@ public class ResourceService {
             Integer courseId, String type, String status, String keyword, String sort, int page, int size) {
         int normalizedPage = Math.max(page, 1);
         int normalizedSize = Math.max(Math.min(size, 50), 1);
-        Long ownerUserId = currentStudentOwnerId();
+        var principal = AuthContext.current();
+        Long viewerUserId = principal == null ? null : principal.userId();
+        String viewerRole = principal == null ? null : principal.role();
         List<ResourceSummary> items = resourceRepository
-                .list(courseId, type, status, keyword, sort, ownerUserId, normalizedPage, normalizedSize)
+                .list(courseId, type, status, keyword, sort, viewerUserId, viewerRole, normalizedPage, normalizedSize)
                 .stream()
                 .map(this::toSummary)
                 .toList();
-        long total = resourceRepository.count(courseId, type, status, keyword, ownerUserId);
+        long total = resourceRepository.count(courseId, type, status, keyword, viewerUserId, viewerRole);
         return new ResourceListResponse(items, normalizedPage, normalizedSize, total);
     }
 
-    private Long currentStudentOwnerId() {
-        var principal = AuthContext.current();
-        return principal != null && "student".equals(principal.role()) ? principal.userId() : null;
-    }
-
     public ResourceDetail getResource(String resourceId) {
-        return resourceRepository
-                .find(resourceId)
-                .map(this::toDetail)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "资源不存在: " + resourceId));
+        return toDetail(readableResource(resourceId));
     }
 
     @Transactional
     public ResourceInteractionResult recordInteraction(
             String resourceId, ResourceInteractionRequest request) {
-        ResourceRepository.ResourceRow row = resourceRepository.find(resourceId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "资源不存在: " + resourceId));
         var principal = AuthContext.requirePrincipal();
-        if ("student".equals(principal.role()) && row.ownerUserId() != principal.userId()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "不能操作其他学生的资源");
-        }
+        ResourceRepository.ResourceRow row = readableResource(resourceId);
         String action = request == null || request.action() == null ? "view" : request.action().trim();
         if (!List.of("view", "start", "complete", "skip", "favorite", "rate").contains(action)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "资源行为类型不合法");
@@ -165,9 +160,11 @@ public class ResourceService {
         if (aiResult == null || aiResult.resources() == null || aiResult.resources().isEmpty()) {
             throw new ExternalServiceException("AI 服务", "资源生成结果为空，已停止写入资源记录");
         }
+        requireSafetyPassed(aiResult);
         List<String> requestedPoints = courseCatalogService.resolveKnowledgePointNames(
                 request.courseId(), request.knowledgePointIds(), request.knowledgePoints());
-        List<EvidenceRef> evidence = aiResult.evidence().stream()
+        List<EvidenceRef> evidence = (aiResult.evidence() == null ? List.<com.edupath.ai.AiAgentClient.AiEvidence>of()
+                : aiResult.evidence()).stream()
                 .map(item -> new EvidenceRef(
                         item.chunkId(), item.title(), item.content(), item.score(), item.source()))
                 .toList();
@@ -179,7 +176,8 @@ public class ResourceService {
                 aiResult.safety().confidence());
 
         List<ResourceSummary> created = new ArrayList<>();
-        String generationMode = aiResult.modelRuntime()
+        Map<String, Object> runtime = aiResult.modelRuntime() == null ? Map.of() : aiResult.modelRuntime();
+        String generationMode = runtime
                 .getOrDefault("mode", "deterministic_fallback")
                 .toString();
         for (AiGeneratedResource generated : aiResult.resources()) {
@@ -194,7 +192,18 @@ public class ResourceService {
                 aiResult.taskId(),
                 evidence,
                 safety,
-                aiResult.modelRuntime());
+                runtime);
+    }
+
+    private void requireSafetyPassed(AiResourceGenerateResult result) {
+        AiSafety safety = result.safety();
+        if (safety != null && safety.passed() && "passed".equalsIgnoreCase(result.safetyStatus())) {
+            return;
+        }
+        List<String> issues = safety == null || safety.issues() == null ? List.of() : safety.issues();
+        String reason = issues.isEmpty() ? "审查结果缺失或互相矛盾" : String.join("；", issues);
+        String message = "SafetyAgent 审查未通过，资源未写入学习链路：" + reason;
+        throw new ExternalServiceException("AI 服务", message.substring(0, Math.min(300, message.length())));
     }
 
     public ResourceSummary updateStatus(String resourceId, ResourceStatusUpdateRequest request) {
@@ -203,6 +212,13 @@ public class ResourceService {
                 : request.status();
         if (!List.of("draft", "published", "archived").contains(status)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "资源状态不合法");
+        }
+        ResourceRepository.ResourceRow row = resourceRepository.find(resourceId)
+                .filter(item -> !"deleted".equals(item.status()))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "资源不存在: " + resourceId));
+        if ("published".equals(status) && (!Boolean.TRUE.equals(row.safety().get("passed"))
+                || (!row.qualityEvaluation().isEmpty() && !qualityGatePassed(row.qualityEvaluation())))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "资源未通过安全或质量门禁，请执行受控修复后再发布");
         }
         int updated = resourceRepository.updateStatus(resourceId, status);
         if (updated == 0) {
@@ -256,15 +272,32 @@ public class ResourceService {
     }
 
     public ResourceVersionsResponse versions(String resourceId) {
+        readableResource(resourceId);
         return new ResourceVersionsResponse(resourceRepository.versions(resourceId));
     }
 
     public ResourceDownloadUrl downloadUrl(String resourceId) {
-        ResourceRepository.ResourceRow row = resourceRepository
-                .find(resourceId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "资源不存在: " + resourceId));
+        ResourceRepository.ResourceRow row = readableResource(resourceId);
         SignedUrl signed = objectStorageService.signedDownloadUrl(row.objectKey());
         return new ResourceDownloadUrl(row.resourceId(), signed.url(), signed.expiresAt());
+    }
+
+    private ResourceRepository.ResourceRow readableResource(String resourceId) {
+        ResourceRepository.ResourceRow row = resourceRepository.find(resourceId)
+                .filter(item -> !"deleted".equals(item.status()))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "资源不存在: " + resourceId));
+        var principal = AuthContext.current();
+        boolean published = "published".equals(row.status());
+        boolean globalPublished = row.ownerUserId() <= 0 && published;
+        boolean manager = principal != null && ("admin".equals(principal.role())
+                || ("teacher".equals(principal.role())
+                    && userRepository.hasCourseRole(principal.userId(), row.courseId())));
+        boolean owner = principal != null && row.ownerUserId() > 0 && row.ownerUserId() == principal.userId();
+        if (globalPublished || manager || (owner && published)) {
+            return row;
+        }
+        // 无权访问统一返回 404，避免枚举其他学生的个性化资源。
+        throw new ResponseStatusException(HttpStatus.NOT_FOUND, "资源不存在: " + resourceId);
     }
 
     private ResourceRepository.ResourceCreate toCreate(

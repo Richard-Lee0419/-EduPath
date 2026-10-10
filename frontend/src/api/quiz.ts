@@ -1,5 +1,6 @@
 import { apiPost } from './http';
-import type { ModelRuntime, ResourceEvidence, ResourceSafety } from '../types/api';
+import { normalizeTaskId, waitForAgentTask, type TaskUpdateHandler } from './task';
+import type { ModelRuntime, ResourceEvidence, ResourceSafety, TaskCreated } from '../types/api';
 
 export type QuizQuestion = {
   question_id: number;
@@ -106,22 +107,24 @@ const mapEvidence = (value: unknown): ResourceEvidence[] => Array.isArray(value)
 
 const asMap = (value: unknown): RawMap => value && typeof value === 'object' ? value as RawMap : {};
 
-export async function generateQuiz(payload: GenerateQuizPayload): Promise<QuizResponse> {
+export async function generateQuiz(payload: GenerateQuizPayload, onUpdate?: TaskUpdateHandler): Promise<QuizResponse> {
   const questionCount = payload.questionCount ?? 3;
   if (questionCount < 1 || questionCount > 3) {
     throw new Error('专项小测仅允许生成 1 至 3 道题');
   }
-  // 测验接口按 API 契约同步返回题目，不创建 agent_task，也不会返回 task_id。
-  const data = asMap(await apiPost<RawMap>('/quiz/generate', {
+  const created = await apiPost<TaskCreated>('/quiz/generate', {
     course_id: payload.courseId,
     knowledge_point_ids: payload.knowledgePointIds ?? [],
     knowledge_points: payload.knowledgePoints ?? [],
     difficulty: payload.difficulty ?? 'basic',
     question_count: questionCount,
-  }));
+  });
+  const taskId = normalizeTaskId(created);
+  const completed = await waitForAgentTask(taskId, onUpdate);
+  const data = asMap(completed.result);
   const rawQuestions = Array.isArray(data.questions) ? data.questions as RawQuizQuestion[] : [];
   return {
-    taskId: '',
+    taskId,
     quiz_id: Number(data.quiz_id ?? data.quizId ?? 0),
     title: String(data.title || ''),
     questions: rawQuestions.map((question) => ({
@@ -144,15 +147,18 @@ export async function generateQuiz(payload: GenerateQuizPayload): Promise<QuizRe
 export async function submitQuiz(
   quizId: number,
   answers: Array<{ question_id: number; answer: string }>,
+  onUpdate?: TaskUpdateHandler,
 ): Promise<QuizSubmitResult> {
   if (answers.length < 1 || answers.length > 3) {
     throw new Error('专项小测仅允许提交 1 至 3 道题');
   }
-  // 提交同样是同步事务：判分、画像回写和路径更新在一次请求中完成。
-  const data = asMap(await apiPost<RawMap>('/quiz/submit', {
+  const created = await apiPost<TaskCreated>('/quiz/submit', {
     quiz_id: quizId,
     answers,
-  }));
+  });
+  const taskId = normalizeTaskId(created);
+  const completed = await waitForAgentTask(taskId, onUpdate);
+  const data = asMap(completed.result);
   const evaluation = asMap(data.evaluation);
   const pathUpdate = asMap(data.path_update);
   const rawQuestionResults = Array.isArray(data.question_results) ? data.question_results as RawMap[] : [];
@@ -163,7 +169,7 @@ export async function submitQuiz(
   const recommendation = String(data.recommendation || '');
   const remedialNodes = Array.isArray(pathUpdate.remedial_nodes) ? pathUpdate.remedial_nodes as RawMap[] : [];
   return {
-    taskId: '',
+    taskId,
     score,
     correctCount: Number(data.correct_count ?? Math.round((score / 100) * totalCount)),
     totalCount: Number(data.total_count ?? totalCount),

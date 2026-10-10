@@ -1,6 +1,6 @@
-# 知径 EduPath API Contract Draft
+# 知径 EduPath API Contract
 
-本文档是知径 EduPath 第 1 阶段接口契约初稿，依据项目计划书第 12 章整理。当前版本用于前端、Java 后端和 AI 服务并行开发时对齐接口边界，后续可演进为 OpenAPI/Swagger 文档。
+本文档用于对齐前端、Java 后端和 AI 服务的当前接口边界。示例中的任务、资源 ID 和分数用于说明响应结构，不代表运行记录；实际验证见 `docs/validation-report.md`。
 
 ## 1. 总体约定
 
@@ -10,7 +10,7 @@
 - Java 后端负责鉴权、业务数据、任务状态、资源存储和统一 API。
 - AI 服务由 Java 后端编排调用，前端不直接依赖 AI 服务内部接口。
 - 长任务必须返回 `task_id`，并支持状态查询和 SSE 流式进度。
-- 需要调用 AI 服务、OSS、向量库等外部服务时，Java 后端通过 Adapter/Client 边界调用；外部服务不可用时任务应进入 `failed`，同步接口应返回明确错误，不应静默改成本地生成结果。
+- 需要调用 AI 服务、OSS、向量库等外部服务时，Java 后端通过 Adapter/Client 边界调用；技术故障返回明确错误或失败任务。路径和辅导允许下文明确说明的审核后回退，必须标记模式，不能伪装为真实模型调用成功。
 - 当前公开 API 版本为 `/api/*`。破坏性变更需要新增版本前缀，例如 `/api/v2/*`，并同步更新 Swagger、前端类型和本文档。
 - Swagger/OpenAPI 入口：`/api-docs`，交互式文档：`/swagger-ui.html`。
 
@@ -77,7 +77,7 @@ data_structures_algorithms | computer_organization
 
 ### 1.4 鉴权与角色
 
-除课程列表、资源公开查询、健康检查、登录和刷新接口外，业务接口需要携带 JWT：
+除课程列表、已发布全局资源查询、健康检查、注册、登录和刷新接口外，业务接口需要携带 JWT：
 
 ```http
 Authorization: Bearer <token>
@@ -313,7 +313,7 @@ SSE 连接也支持 `access_token` 查询参数，用于浏览器 `EventSource` 
 
 上传课程文档。请求使用 `multipart/form-data`。
 
-权限：`teacher` 或 `admin`。
+权限：该课程的管理教师或 `admin`。
 
 表单字段：
 
@@ -329,6 +329,8 @@ SSE 连接也支持 `access_token` 查询参数，用于浏览器 `EventSource` 
   "document_id": 1001,
   "parse_status": "parsed",
   "index_status": "indexed",
+  "safety_status": "passed",
+  "index_error": "",
   "storage_provider": "local",
   "bucket": "edupath-demo",
   "object_key": "edupath/knowledge-base/uuid-file.pdf",
@@ -341,7 +343,9 @@ SSE 连接也支持 `access_token` 查询参数，用于浏览器 `EventSource` 
 }
 ```
 
-说明：`storage_provider=local` 时，后端会把上传内容写入 `edupath.storage.local-root` 下的对象路径，并返回本地签名下载链接；`storage_provider=oss` 时，后端通过阿里云 OSS SDK 上传、读取、删除并生成签名下载 URL。上传后 Java 后端会调用 AI 服务 `/kb/ingest`，AI 服务解析 text/PDF/DOCX/PPTX、语义切分、Embedding 并写入当前向量库。
+说明：`storage_provider=local` 时，后端会把上传内容写入 `edupath.storage.local-root` 下的对象路径，并返回本地签名下载链接；`storage_provider=oss` 时，后端通过阿里云 OSS SDK 上传、读取、删除并生成签名下载 URL。上传后 Java 后端调用 AI 服务 `/kb/ingest`，依次执行解析、切分、Safety 审查和向量替换。
+
+上传响应包含 `safety_status`（`passed` 或 `review_required`）和 `index_error`。Safety 拒绝或索引写入失败时保留失败文档、存储对象及索引任务记录，返回 `index_status=failed`，不写后端 chunk；调用方必须检查状态，不能仅凭 HTTP 成功提示“已入库”。技术错误与拒绝原因进入 `index_error`，可供课程管理者诊断和重试。AI 服务拒绝重建时撤回该文档已有向量；撤回失败明确报告错误。
 
 ### GET `/api/kb/documents`
 
@@ -356,9 +360,9 @@ SSE 连接也支持 `access_token` 查询参数，用于浏览器 `EventSource` 
 
 ### PATCH `/api/kb/documents/{documentId}/status`
 
-更新文档解析/索引状态。
+兼容旧客户端的状态检查接口，不允许用手工状态修改绕过真实入库结果。
 
-权限：`teacher` 或 `admin`。
+权限：该课程的管理教师或 `admin`。
 
 请求：
 
@@ -369,11 +373,13 @@ SSE 连接也支持 `access_token` 查询参数，用于浏览器 `EventSource` 
 }
 ```
 
+只有请求状态与记录中的实际状态完全相同时才返回成功；尝试伪造 `parsed` / `indexed` 等状态返回 `409`。改变状态应使用重建索引流程。
+
 ### POST `/api/kb/documents/{documentId}/reindex`
 
-创建知识库重建索引任务，返回 `task_id`。任务会重新读取对象存储中的文件，调用 AI 服务执行解析、语义切分、Embedding 和向量索引写入，并替换后端 chunk 记录。
+创建知识库重建索引任务，返回 `task_id`。任务重新读取对象存储文件，经过 Safety 后替换该文档的向量与后端 chunk。拒绝或写入失败时文档索引状态和 Java 任务均为 `failed`，不返回成功任务。当前替换包含删除、写入和失败清理，不具有跨数据库事务；撤回失败时保留失败原因供重试。
 
-权限：`teacher` 或 `admin`。
+权限：该课程的管理教师或 `admin`。
 
 ### GET `/api/kb/documents/{documentId}/download-url`
 
@@ -383,9 +389,9 @@ SSE 连接也支持 `access_token` 查询参数，用于浏览器 `EventSource` 
 
 ### DELETE `/api/kb/documents/{documentId}`
 
-软删除知识库文档。
+先请求 AI 服务确认该课程、文档的向量撤回，再移除后端 chunk 镜像和软删除文档。AI 服务不可用或撤回失败时返回错误，不标记文档已删除，允许重试。重复撤回返回数量 0 视为成功；软删除不代表物理删除原始存储对象。
 
-权限：`teacher` 或 `admin`。
+权限：该课程的管理教师或 `admin`。
 
 ### POST `/api/kb/search`
 
@@ -561,7 +567,7 @@ Java 后端只把本轮消息和课程范围发送到 AI 服务；AI 服务在�
 
 Java 后端会根据当前登录用户自动读取最新画像版本，并把 `student_profile` 快照传给 AI 服务。前端不得自行提交或覆盖 `student_id`。画像快照包含学习目标、知识基础、薄弱点、错因、资源偏好、认知风格、学习节奏和最近测验结果；空画像保持为空，不使用演示用户默认值。外部模型只接收学习目标、薄弱点、资源偏好、认知风格、错因、学习节奏、最近测验结果等去标识化字段，不发送用户 ID、姓名、手机号或邮箱。
 
-Java 后端通过 AI 服务内部 `POST /resource/tasks` 创建异步任务，再轮询 `GET /tasks/{task_id}`，把实际 Agent 步骤映射到外部任务；兼容接口 `POST /resource/generate` 仅保留给同步调试。`ResourcePlannerAgent` 根据画像调整资源顺序和有效难度，Lecture、Mindmap、Quiz、Codelab、AnimationScript 等资源 Agent 分别调用模型并执行结构校验；所有资源返回 `personalized_reason`、`estimated_minutes`、`evidence_chunk_ids` 与不含敏感信息的 `profile_fingerprint`。SafetyAgent 使用同一批 RAG 证据独立复核。真实模型模式下，若首次复核未通过，编排器最多执行一轮 SafetyAgent 反馈驱动的完整资源返修，并再次独立复核。最终资源由 `resource-quality-v1` 确定性评估器计算证据覆盖、结构完整、知识一致、难度匹配和安全审查五项分数，形成 `quality_evaluation`。当 SafetyAgent 已通过但部分资源未通过质量门禁时，编排器只把这些资源的失败维度、发现和建议反馈给对应资源 Agent，最多执行一轮定向修订；已合格资源保持不变。定向修订后必须再次执行 SafetyAgent 和五维量化复评。只有 SafetyAgent 通过、质量总分不低于 75，且五个维度均不低于 60 的资源才通过质量门禁并自动发布；否则只能保存为 `draft`。Java 后端持久化完整评分快照，便于回归比较。
+Java 后端通过 AI 服务内部 `POST /resource/tasks` 创建异步任务，再轮询 `GET /tasks/{task_id}`，把实际 Agent 步骤映射到外部任务；兼容接口 `POST /resource/generate` 仅保留给同步调试。`ResourcePlannerAgent` 根据画像调整资源顺序和有效难度，Lecture、Mindmap、Quiz、Codelab、AnimationScript 等资源 Agent 分别调用模型并执行结构校验；所有资源返回 `personalized_reason`、`estimated_minutes`、`evidence_chunk_ids` 与不含敏感信息的 `profile_fingerprint`。SafetyAgent 使用同一批 RAG 证据独立复核。真实模型模式下，若首次复核未通过，编排器最多执行一轮 SafetyAgent 反馈驱动的完整资源返修，并再次独立复核。最终资源由 `resource-quality-v1` 确定性评估器计算证据覆盖、结构完整、知识一致、难度匹配和安全审查五项分数，形成 `quality_evaluation`。当 SafetyAgent 已通过但部分资源未通过质量门禁时，编排器只把这些资源的失败维度、发现和建议反馈给对应资源 Agent，最多执行一轮定向修订；已合格资源保持不变。定向修订后必须再次执行 SafetyAgent 和五维量化复评。只有 SafetyAgent 通过、质量总分不低于 75，且五个维度均不低于 60 的资源才通过质量门禁并自动发布。Safety 通过但质量不足的资源保存为 `draft`；最终 Safety 拒绝使整个任务失败，不写资源对象或记录。Java 后端持久化安全通过资源的完整评分快照，便于回归比较。
 
 响应 `data`：
 
@@ -1023,7 +1029,7 @@ data: {"task_id":"task_resource_9f6d0c1b7a2e4f2d8c1a0b3e4d5f6a7b"}
 
 ### GET `/api/resources/{resourceId}`
 
-获取资源详情。
+获取资源详情。列表、详情、下载和交互使用同一访问边界：匿名用户只能读取 `published` 全局资源；学生可读取全局已发布资源及自己的已发布资源；课程管理教师和管理员可检查课程范围内的 draft / archived。个人资源不得通过匿名 ID 枚举访问；无权读取或已删除资源返回 `404`。
 
 响应 `data`：
 
@@ -1080,7 +1086,7 @@ data: {"task_id":"task_resource_9f6d0c1b7a2e4f2d8c1a0b3e4d5f6a7b"}
 
 ### POST `/api/resources/{resourceId}/interactions`
 
-记录当前登录用户的真实学习行为。学生只能操作自己的资源。
+记录当前登录用户的真实学习行为。学生可操作自己可见的已发布资源（包括全局资源），不能对他人的个人资源或 draft / archived 操作。
 
 ```json
 {
@@ -1107,6 +1113,8 @@ data: {"task_id":"task_resource_9f6d0c1b7a2e4f2d8c1a0b3e4d5f6a7b"}
 }
 ```
 
+将资源状态改为 `published` 时，资源必须同时有明确的 Safety 通过结果和质量门禁通过结果；缺失、拒绝或相矛盾状态返回 `409`。Safety 拒绝的生成任务直接失败，不写资源对象或记录；Safety 通过但质量不达标的内容可保留 draft，供原有受控修复流程使用。
+
 ### POST `/api/resources/{resourceId}/archive`
 
 归档资源。
@@ -1122,6 +1130,8 @@ data: {"task_id":"task_resource_9f6d0c1b7a2e4f2d8c1a0b3e4d5f6a7b"}
 ### GET `/api/resources/{resourceId}/download-url`
 
 获取资源对象签名下载链接。
+
+权限与详情一致。获取过的签名链接在有效期内具有持有者访问语义；资源归档不撤销已发出的链接，生产环境需结合较短过期时间和访问审计。
 
 ## 8. 学习路径接口
 
@@ -1142,7 +1152,7 @@ data: {"task_id":"task_resource_9f6d0c1b7a2e4f2d8c1a0b3e4d5f6a7b"}
 
 Java 后端同样会自动附加当前登录用户的最新 `student_profile`，路径生成不接受前端伪造画像。
 
-AI 服务只向外部模型发送去标识化画像维度和本次检索的课程证据。PathAgent 必须返回严格结构化的连续日计划，每天任务总时长不得超过 `daily_minutes`，并保存真实 `evidence_chunk_ids`。独立 SafetyAgent 检查时间预算、个性化依据、课程事实与证据引用；未通过时 Java 任务失败且不得持久化新路径版本。真实模型运行记录通过任务结果返回，不得根据“已配置 Key”推断调用成功。
+AI 服务只向外部模型发送去标识化画像维度和本次检索的课程证据。PathAgent 返回严格结构化的连续日计划，每天任务总时长不得超过 `daily_minutes`，并保存真实 `evidence_chunk_ids`。模型错误或模型审核失败时，当前初始路径流水线可使用经审查的规则路径，明确返回 `generation_mode=deterministic_fallback`；最终输出仍未通过 Safety 时 Java 任务失败且不得持久化新路径版本。真实模型运行记录通过任务结果返回，不得根据“已配置 Key”推断调用成功。
 
 响应 `data`：
 
@@ -1276,7 +1286,7 @@ AI 服务只向外部模型发送去标识化画像维度和本次检索的课�
 
 `trigger_key` 由学生、当前路径 ID/版本和确定性风险快照生成。同一触发键对应固定 `task_id`，重复请求返回 `reused=true`，不会再次调用模型。任务流程为 `BehaviorSignalAgent → ProfileAgent → KnowledgeAgent → PathAgent → SafetyAgent`。
 
-执行前会再次校验信号和路径版本；AI 服务必须回传相同的 `behavior_trigger_key`、`trigger=behavior_signal`、结构化三日以内路径、模型运行记录和通过的 SafetyAgent 结果。模型失败、SafetyAgent 拒绝、信号失效或路径版本并发变化时，任务进入 `failed`，原路径保持不变。只有全部校验通过后，才以新版本写入 `learning_paths`。
+执行前会再次校验信号和路径版本；AI 服务必须回传相同的 `behavior_trigger_key`、`trigger=behavior_signal`、结构化三日以内路径、模型运行记录和通过的 SafetyAgent 结果。模型失败或模型审核失败时，当前重规划流水线可返回经审核的规则路径，并标记 `deterministic_fallback`。最终 Safety 拒绝、信号失效或路径版本并发变化时任务失败，原路径保持不变；全部业务校验通过后才写入新版本。
 
 ### POST `/api/path/nodes/{day}/complete`
 
@@ -1288,7 +1298,7 @@ AI 服务只向外部模型发送去标识化画像维度和本次检索的课�
 
 连续掌握度使用确定性加权证据：测验每次权重为 `10`，资源完成、代码实验、路径完成和辅导追问权重为 `1-3`。计算形式为 `(测验正确证据分 + 行为证据分) / (测验权重 + 行为权重)`；测验仍是最高权重证据，行为只能连续校准，不能替代评估。
 
-生产环境的画像抽取、资源生成、学习路径与智能辅导必须调用已配置的 OpenAI-compatible LLM，并将去标识化用户画像与必要的 RAG 证据片段传入模型。模型异常、返回非 JSON、结构不合法或超时必须让任务失败并返回错误，不允许静默退回统一模板。确定性 Agent 仅供未配置 LLM 的开发环境和自动化测试使用；其结果必须标记为 `deterministic_fallback`，不得作为“真实模型演示”证据。所有生成结果仍须通过 SafetyAgent 审查。
+生产环境启动需配置模型与 embedding，但配置存在不代表每次生成成功调用了模型。各流水线的失败和回退行为需区分：画像和小测/评估对不合格输出返回失败；路径生成/重规划和辅导允许明确标记的经审核回退，辅导回退只整理当前课程证据。结果必须保留 `generation_mode`、`model_runtime`，`deterministic_fallback` 不得作为“真实模型演示”证据。所有最终生成结果仍须通过 SafetyAgent 审查。
 
 ## 9. 智能辅导接口
 
@@ -1371,7 +1381,7 @@ AI 服务只向外部模型发送去标识化画像维度和本次检索的课�
 }
 ```
 
-`citations[].answer_fragment` 必须逐字存在于 `answer_markdown`，其 `evidence_chunk_ids` 必须来自本次真实检索结果。首次提问只记录 `tutor_question` 审计事件；携带本人同课程 `session_id` 的有效追问记录轻量掌握度证据。AI 服务返回的结构、引用、隐私或 SafetyAgent 结果不合格时任务必须失败，Java 后端不得创建辅导会话或保存助手回答。未配置模型的开发环境结果必须标记为 `deterministic_fallback`。
+`citations[].answer_fragment` 必须逐字存在于 `answer_markdown`，其 `evidence_chunk_ids` 必须来自本次真实检索结果。首次提问只记录 `tutor_question` 审计事件；携带本人同课程 `session_id` 的有效追问记录轻量掌握度证据。模型错误或修订后审核仍失败时，AI 可返回仅摘录证据的 `deterministic_fallback`，包括已配置模型的环境；回退同样接受引用和 Safety 检查。最终输出结构、引用、隐私或 Safety 不合格时任务失败，不创建会话或保存助手回答。运行记录保留已发生的模型调用，回退不能伪装成真实模型回答。
 
 ## 10. 测试与评估接口
 
@@ -1399,6 +1409,8 @@ AI 服务只向外部模型发送去标识化画像维度和本次检索的课�
 ```
 
 任务结果通过 `GET /api/agent/tasks/{taskId}` 或 SSE 查询。成功结果包含 `quiz_id`、`title`、恰好 1-3 个 `questions`、`evidence`、`safety`、`generation_mode`、`model_runtime` 和 AI `source_task_id`。学生作答前的题目结构不得返回 `answer` 或 `explanation`；每题必须返回用于审计的 `evidence_chunk_ids`。
+
+前端生成与提交均先读取 `task_id`，等待任务成功后再读取 `result`；初始响应不含题目或评估。等待过程中应展示实际任务进度，失败终态应显示错误，不得把空数组当作成功结果。
 
 生成顺序固定为 `KnowledgeAgent → QuizAgent → SafetyAgent`。QuizAgent 输出必须经过封闭结构、题量、选项唯一性、单一正确答案和真实 chunk 引用校验；不合格结果不得落库。
 
@@ -1618,9 +1630,23 @@ Java 后端使用 Flyway 管理基础表结构，核心表包括：
 
 请求日志会写入 `audit_logs`，同时输出 trace id、actor、method、path、status、duration。AI 调用失败会返回 `50200` 或将异步任务置为 `failed`。
 
-## 14. 后续待补充
+## 14. 当前验证边界
 
-- 真实 OSS SDK 上传和下载签名 URL。
-- 真实向量库索引和删除重建流程。
-- 更细粒度的 RBAC 权限矩阵，例如班级、课程团队和资源 owner 维度。
-- AI 服务内部接口可按 OpenAPI 单独发布。
+- 已实现 OSS SDK 适配，但本次本地验证未使用云 OSS。
+- 已实现 local / Chroma 索引适配和文档向量撤回；单元回归包含模拟 Chroma，当前跨服务 smoke 使用 local 向量库，未证明真实 Chroma 部署可用。
+- 资源与知识库按 owner、课程管理角色和管理员划分权限；这不是覆盖所有教学业务的通用 RBAC 体系。
+- 任务线程池和内存 AI 任务不提供生成步骤断点恢复；Java 保存快照并将陈旧执行任务标记失败。
+
+## 15. AI 内部知识库撤回接口
+
+`DELETE /kb/documents/{document_id}/vectors?course_id=...` 仅供 Java 服务使用，前端不直接调用。返回原始 JSON（不包装 Java `code/message/data`）：
+
+```json
+{
+  "document_id": 1001,
+  "course_id": 1,
+  "deleted_chunks": 3
+}
+```
+
+按课程和文档标识精确撤回，不删除同前缀的其他文档；删除数量 `0` 是幂等成功。向量适配器失败返回 `503`。Java 校验响应中的文档、课程与删除数量后才修改后端文档状态。该接口无独立用户 JWT 鉴权，部署时 AI 服务应限于内部网络，公开开发端口只用于本地联调。

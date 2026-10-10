@@ -8,6 +8,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -28,23 +29,25 @@ public class KnowledgeDocumentRepository {
             String objectKey,
             String objectUrl,
             String storageStatus) {
-        jdbcTemplate.update(
-                """
+        var keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            var statement = connection.prepareStatement("""
                 INSERT INTO knowledge_documents (
                     course_id, filename, content_type, size, parse_status, index_status,
                     object_key, object_url, storage_status, uploaded_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, 'not_indexed', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """,
-                courseId,
-                filename,
-                contentType,
-                size,
-                parseStatus,
-                objectKey,
-                objectUrl,
-                storageStatus);
-        Long id = jdbcTemplate.queryForObject("SELECT MAX(document_id) FROM knowledge_documents", Long.class);
-        return id == null ? 0 : id;
+                """, new String[] {"document_id"});
+            statement.setLong(1, courseId);
+            statement.setString(2, filename);
+            statement.setString(3, contentType);
+            statement.setLong(4, size);
+            statement.setString(5, parseStatus);
+            statement.setString(6, objectKey);
+            statement.setString(7, objectUrl);
+            statement.setString(8, storageStatus);
+            return statement;
+        }, keyHolder);
+        return keyHolder.getKey().longValue();
     }
 
     public List<DocumentRow> list(Long courseId, String status) {
@@ -121,6 +124,28 @@ public class KnowledgeDocumentRepository {
                 status,
                 requestedBy,
                 message);
+    }
+
+    public long beginIndexJob(long documentId, String taskId, String requestedBy) {
+        var keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            var statement = connection.prepareStatement("""
+                    INSERT INTO knowledge_index_jobs (document_id, task_id, status, requested_by, message, created_at)
+                    VALUES (?, ?, 'running', ?, '正在解析并审核资料', CURRENT_TIMESTAMP)
+                    """, new String[] {"id"});
+            statement.setLong(1, documentId);
+            statement.setString(2, taskId);
+            statement.setString(3, requestedBy);
+            return statement;
+        }, keyHolder);
+        return keyHolder.getKey().longValue();
+    }
+
+    public void finishIndexAttempt(long jobId, String taskId, String status, String message) {
+        jdbcTemplate.update("""
+                UPDATE knowledge_index_jobs SET task_id = COALESCE(?, task_id), status = ?,
+                    message = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?
+                """, taskId, status, message, jobId);
     }
 
     public void finishIndexJob(long documentId, String taskId, String status, String message) {

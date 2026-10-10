@@ -36,17 +36,18 @@ public class ResourceRepository {
             String keyword,
             String sort,
             Long ownerUserId,
+            String viewerRole,
             int page,
             int size) {
-        QueryParts query = queryParts(courseId, type, status, keyword, ownerUserId);
+        QueryParts query = queryParts(courseId, type, status, keyword, ownerUserId, viewerRole);
         query.sql().append(" ORDER BY ").append(sortClause(sort)).append(" LIMIT ? OFFSET ?");
         query.args().add(size);
         query.args().add((page - 1) * size);
         return jdbcTemplate.query(query.sql().toString(), this::mapRow, query.args().toArray());
     }
 
-    public long count(Integer courseId, String type, String status, String keyword, Long ownerUserId) {
-        QueryParts query = queryParts(courseId, type, status, keyword, ownerUserId);
+    public long count(Integer courseId, String type, String status, String keyword, Long ownerUserId, String viewerRole) {
+        QueryParts query = queryParts(courseId, type, status, keyword, ownerUserId, viewerRole);
         query.sql().replace(0, "SELECT *".length(), "SELECT COUNT(*)");
         Long count = jdbcTemplate.queryForObject(query.sql().toString(), Long.class, query.args().toArray());
         return count == null ? 0 : count;
@@ -108,6 +109,7 @@ public class ResourceRepository {
             String resourceType,
             String generationMode,
             Long ownerUserId,
+            Long managerUserId,
             OffsetDateTime since) {
         StringBuilder sql = new StringBuilder(
                 "SELECT resource_id, resource_type, generation_mode, quality_evaluation, created_at "
@@ -118,6 +120,7 @@ public class ResourceRepository {
             sql.append(" AND owner_user_id = ?");
             args.add(ownerUserId);
         }
+        appendManagerScope(sql, args, managerUserId);
         if (courseId != null) {
             sql.append(" AND course_id = ?");
             args.add(courseId);
@@ -151,6 +154,7 @@ public class ResourceRepository {
             String resourceType,
             String generationMode,
             Long ownerUserId,
+            Long managerUserId,
             OffsetDateTime since,
             int limit) {
         StringBuilder sql = new StringBuilder(
@@ -162,6 +166,7 @@ public class ResourceRepository {
             sql.append(" AND owner_user_id = ?");
             args.add(ownerUserId);
         }
+        appendManagerScope(sql, args, managerUserId);
         if (courseId != null) {
             sql.append(" AND course_id = ?");
             args.add(courseId);
@@ -181,6 +186,14 @@ public class ResourceRepository {
         sql.append(" ORDER BY created_at DESC LIMIT ?");
         args.add(Math.max(1, Math.min(limit, 50)));
         return jdbcTemplate.query(sql.toString(), this::mapRow, args.toArray());
+    }
+
+    private void appendManagerScope(StringBuilder sql, List<Object> args, Long managerUserId) {
+        if (managerUserId != null) {
+            sql.append(" AND EXISTS (SELECT 1 FROM user_course_roles ucr"
+                    + " WHERE ucr.user_id = ? AND ucr.course_id = resources.course_id)");
+            args.add(managerUserId);
+        }
     }
 
     public void addInteraction(String resourceId, long userId, String action, Integer rating, Integer progressPercent) {
@@ -232,12 +245,22 @@ public class ResourceRepository {
     }
 
     private QueryParts queryParts(
-            Integer courseId, String type, String status, String keyword, Long ownerUserId) {
+            Integer courseId, String type, String status, String keyword, Long ownerUserId, String viewerRole) {
         StringBuilder sql = new StringBuilder("SELECT * FROM resources WHERE status <> 'deleted'");
         List<Object> args = new ArrayList<>();
-        if (ownerUserId != null) {
-            sql.append(" AND owner_user_id = ?");
-            args.add(ownerUserId);
+        if (!"admin".equals(viewerRole)) {
+            sql.append(" AND ((status = 'published' AND (owner_user_id IS NULL OR owner_user_id <= 0))");
+            if (ownerUserId != null) {
+                sql.append(" OR (status = 'published' AND owner_user_id = ?)");
+                args.add(ownerUserId);
+                if ("teacher".equals(viewerRole)) {
+                    sql.append(" OR EXISTS (SELECT 1 FROM user_course_roles ucr"
+                            + " WHERE ucr.user_id = ? AND ucr.course_id = resources.course_id"
+                            + ")");
+                    args.add(ownerUserId);
+                }
+            }
+            sql.append(")");
         }
         if (courseId != null) {
             sql.append(" AND course_id = ?");

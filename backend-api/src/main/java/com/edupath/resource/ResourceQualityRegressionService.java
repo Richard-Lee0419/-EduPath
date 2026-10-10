@@ -82,6 +82,7 @@ public class ResourceQualityRegressionService {
                         request.resourceType(),
                         request.generationMode(),
                         ownerUserId,
+                        currentCourseManagerId(),
                         OffsetDateTime.now(CHINA_OFFSET).minusDays(request.windowDays()),
                         Math.min(50, request.maxResources() * 5))
                 .stream()
@@ -268,6 +269,11 @@ public class ResourceQualityRegressionService {
     private Long currentStudentOwnerId() {
         var principal = AuthContext.requirePrincipal();
         return "student".equals(principal.role()) ? principal.userId() : null;
+    }
+
+    private Long currentCourseManagerId() {
+        var principal = AuthContext.requirePrincipal();
+        return "teacher".equals(principal.role()) ? principal.userId() : null;
     }
 
     private QualityRegressionRequest normalize(QualityRegressionRequest request) {

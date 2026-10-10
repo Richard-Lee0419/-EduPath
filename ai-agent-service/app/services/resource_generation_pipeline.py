@@ -196,7 +196,14 @@ class ResourceGenerationPipeline:
         task_manager.start_task(task_id)
         try:
             result = self._run(task_id, request, resource_types, planned_agents)
-            task_manager.complete_task(task_id, result)
+            safety = result.get("safety", {})
+            if not isinstance(safety, dict) or safety.get("passed") is not True:
+                # Keep audit metadata, but never expose refused content as a usable task result.
+                result["resources"] = []
+                task_manager.update_task(task_id, result=result)
+                task_manager.fail_task(task_id, "SafetyAgent 审查未通过，未发布学习资源")
+            else:
+                task_manager.complete_task(task_id, result)
         except Exception as exception:
             task_manager.fail_task(task_id, _safe_error(exception))
 
@@ -415,17 +422,11 @@ class ResourceGenerationPipeline:
             )
 
         safety_status = "passed" if safety.passed else "review_required"
-        if any(
-            resource.quality_evaluation is not None
-            and not resource.quality_evaluation.gate_passed
-            for resource in resources
-        ):
-            safety_status = "review_required"
         self._step(
             task_id,
             "SafetyAgent",
-            "success",
-            "SafetyAgent 审查通过" if safety.passed else "内容已转为人工复核状态",
+            "success" if safety.passed else "failed",
+            "SafetyAgent 审查通过" if safety.passed else "SafetyAgent 审查未通过，禁止发布资源",
             97,
         )
 

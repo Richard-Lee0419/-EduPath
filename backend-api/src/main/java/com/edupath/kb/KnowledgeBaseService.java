@@ -50,7 +50,7 @@ public class KnowledgeBaseService {
         this.maxUploadBytes = Math.max(1, maxUploadBytes);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = ExternalServiceException.class)
     public DocumentUploadResult upload(long courseId, String filename, String contentType, byte[] content) {
         byte[] safeContent = content == null ? new byte[0] : content;
         validateUpload(filename, contentType, safeContent.length);
@@ -64,23 +64,28 @@ public class KnowledgeBaseService {
                 storedObject.objectKey(),
                 storedObject.objectUrl(),
                 storedObject.storageStatus());
-        KnowledgeIngestResult ingestResult;
+        long jobId = knowledgeDocumentRepository.beginIndexJob(documentId, null, AuthContext.currentUsername());
+        IngestOutcome outcome;
         try {
-            ingestResult = ingestDocument(documentId, courseId, filename, contentType, safeContent, storedObject.objectKey());
-        } catch (RuntimeException exception) {
+            outcome = ingestDocument(documentId, courseId, filename, contentType, safeContent, storedObject.objectKey());
+        } catch (ExternalServiceException exception) {
             knowledgeDocumentRepository.updateStatus(documentId, "failed", "failed");
+            knowledgeDocumentRepository.finishIndexAttempt(jobId, null, "failed", failureMessage(exception));
             throw exception;
         }
+        knowledgeDocumentRepository.finishIndexAttempt(jobId, outcome.taskId(), outcome.jobStatus(), outcome.reason());
         return new DocumentUploadResult(
                 documentId,
-                ingestResult.parseStatus(),
-                ingestResult.indexStatus(),
+                outcome.parseStatus(),
+                outcome.indexStatus(),
                 storedObject.provider(),
                 storedObject.bucket(),
                 storedObject.objectKey(),
                 storedObject.objectUrl(),
                 storedObject.storageStatus(),
-                signedUrl(storedObject.objectKey()));
+                signedUrl(storedObject.objectKey()),
+                outcome.safetyStatus(),
+                outcome.reason());
     }
 
     public KnowledgeSearchResponse search(KnowledgeSearchRequest request) {
@@ -232,6 +237,11 @@ public class KnowledgeBaseService {
         String indexStatus = request == null || request.indexStatus() == null || request.indexStatus().isBlank()
                 ? "not_indexed"
                 : request.indexStatus();
+        var document = knowledgeDocumentRepository.find(documentId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "文档不存在: " + documentId));
+        if (!parseStatus.equals(document.parseStatus()) || !indexStatus.equals(document.indexStatus())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "解析和索引状态由实际摄入任务决定，请执行重建索引");
+        }
         int updated = knowledgeDocumentRepository.updateStatus(documentId, parseStatus, indexStatus);
         if (updated == 0) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "文档不存在: " + documentId);
@@ -249,29 +259,44 @@ public class KnowledgeBaseService {
                 message);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = ExternalServiceException.class)
     public DocumentUploadResult reindexDocument(long documentId) {
         KnowledgeDocumentRepository.DocumentRow document = knowledgeDocumentRepository
                 .find(documentId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "文档不存在: " + documentId));
-        byte[] content = objectStorageService.read(document.objectKey());
-        KnowledgeIngestResult ingestResult = ingestDocument(
+        long jobId = knowledgeDocumentRepository.beginIndexJob(documentId, null, AuthContext.currentUsername());
+        IngestOutcome outcome;
+        try {
+            byte[] content = objectStorageService.read(document.objectKey());
+            outcome = ingestDocument(
                 document.documentId(),
                 document.courseId(),
                 document.filename(),
                 document.contentType(),
                 content,
                 document.objectKey());
+        } catch (RuntimeException exception) {
+            knowledgeDocumentRepository.deleteChunks(documentId);
+            knowledgeDocumentRepository.updateStatus(documentId, "failed", "failed");
+            knowledgeDocumentRepository.finishIndexAttempt(jobId, null, "failed", failureMessage(exception));
+            throw new ExternalServiceException("AI 服务", "文档重建索引失败", exception);
+        }
+        knowledgeDocumentRepository.finishIndexAttempt(jobId, outcome.taskId(), outcome.jobStatus(), outcome.reason());
+        if (!"succeeded".equals(outcome.jobStatus())) {
+            throw new ExternalServiceException("AI 服务", outcome.reason());
+        }
         return new DocumentUploadResult(
                 document.documentId(),
-                ingestResult.parseStatus(),
-                ingestResult.indexStatus(),
+                outcome.parseStatus(),
+                outcome.indexStatus(),
                 objectStorageService.provider(),
                 objectStorageService.bucket(),
                 document.objectKey(),
                 document.objectUrl(),
                 document.storageStatus(),
-                signedUrl(document.objectKey()));
+                signedUrl(document.objectKey()),
+                outcome.safetyStatus(),
+                outcome.reason());
     }
 
     public long documentCourseId(long documentId) {
@@ -293,7 +318,7 @@ public class KnowledgeBaseService {
         return objectStorageService.signedDownloadUrl(objectKey);
     }
 
-    private KnowledgeIngestResult ingestDocument(
+    private IngestOutcome ingestDocument(
             long documentId,
             long courseId,
             String filename,
@@ -307,6 +332,28 @@ public class KnowledgeBaseService {
                 contentType,
                 content == null ? new byte[0] : content,
                 objectKey));
+        if (result == null) {
+            throw new ExternalServiceException("AI 服务", "知识库摄入未返回结果");
+        }
+        String parseStatus = clean(result.parseStatus()).isEmpty() ? "parsed" : clean(result.parseStatus());
+        boolean safetyPassed = result.safety() != null && result.safety().passed()
+                && "passed".equalsIgnoreCase(result.safetyStatus());
+        String reason = clean(result.indexError());
+        if (!safetyPassed || !"indexed".equalsIgnoreCase(result.indexStatus()) || !reason.isEmpty()) {
+            if (!safetyPassed) {
+                List<String> issues = result.safety() == null || result.safety().issues() == null
+                        ? List.of() : result.safety().issues();
+                String rejection = "SafetyAgent 审查未通过，未写入后端 chunk"
+                        + (issues.isEmpty() ? "（审查结果缺失或矛盾）" : "：" + String.join("；", issues));
+                reason = reason.isEmpty() ? rejection : rejection + "；" + reason;
+            } else if (reason.isEmpty()) {
+                reason = "向量索引未完成，未写入后端 chunk";
+            }
+            knowledgeDocumentRepository.deleteChunks(documentId);
+            knowledgeDocumentRepository.updateStatus(documentId, parseStatus, "failed");
+            return new IngestOutcome(result.taskId(), parseStatus, "failed", result.safetyStatus(),
+                    safetyPassed ? "failed" : "rejected", truncate(reason));
+        }
         if (result.chunks() == null || result.chunks().isEmpty()) {
             throw new ExternalServiceException("AI 服务", "知识库解析未返回有效 chunk");
         }
@@ -322,16 +369,33 @@ public class KnowledgeBaseService {
         }
         knowledgeDocumentRepository.updateStatus(
                 documentId,
-                result.parseStatus() == null || result.parseStatus().isBlank() ? "parsed" : result.parseStatus(),
-                result.indexStatus() == null || result.indexStatus().isBlank() ? "indexed" : result.indexStatus());
-        return result;
+                parseStatus,
+                "indexed");
+        return new IngestOutcome(result.taskId(), parseStatus, "indexed", result.safetyStatus(), "succeeded", "");
     }
+
+    private String clean(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private String truncate(String value) {
+        return value.substring(0, Math.min(300, value.length()));
+    }
+
+    private String failureMessage(RuntimeException exception) {
+        return truncate(exception.getMessage() == null ? "解析或索引服务失败" : exception.getMessage());
+    }
+
+    private record IngestOutcome(String taskId, String parseStatus, String indexStatus,
+            String safetyStatus, String jobStatus, String reason) {}
 
     @Transactional
     public void deleteDocument(long documentId) {
         KnowledgeDocumentRepository.DocumentRow document = knowledgeDocumentRepository
                 .find(documentId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "文档不存在: " + documentId));
+        aiAgentClient.deleteKnowledgeDocumentVectors(document.documentId(), document.courseId());
+        knowledgeDocumentRepository.deleteChunks(documentId);
         int updated = knowledgeDocumentRepository.markDeleted(documentId);
         if (updated == 0) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "文档不存在: " + documentId);
@@ -387,7 +451,9 @@ public class KnowledgeBaseService {
             String objectKey,
             String objectUrl,
             String storageStatus,
-            SignedUrl signedDownloadUrl) {}
+            SignedUrl signedDownloadUrl,
+            String safetyStatus,
+            String indexError) {}
 
     public record DocumentDownloadUrl(long documentId, String url, java.time.OffsetDateTime expiresAt) {}
 

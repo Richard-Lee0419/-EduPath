@@ -69,6 +69,10 @@ const loadQuiz = async () => {
         difficulty: 'basic',
         questionCount: 3,
       },
+      (task) => {
+        activeTaskId.value = task.task_id;
+        taskProgress.value = task.progress;
+      },
     );
     activeTaskId.value = quiz.taskId;
     taskProgress.value = 100;
@@ -103,6 +107,10 @@ const submitCurrentQuiz = async () => {
         question_id: question.question_id,
         answer: answers.value[question.question_id] || '',
       })),
+      (task) => {
+        activeTaskId.value = task.task_id;
+        taskProgress.value = task.progress;
+      },
     );
     activeTaskId.value = result.taskId;
     taskProgress.value = 100;

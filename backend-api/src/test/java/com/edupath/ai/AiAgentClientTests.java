@@ -249,6 +249,56 @@ class AiAgentClientTests {
                 .hasMessageContaining("/resource/generate 不可用");
     }
 
+    @Test
+    void knowledgeIngestPreservesSafetyAndIndexFailureMetadata() {
+        registerJsonHandler("/kb/ingest", 200, """
+                {"task_id":"kb-refused","parse_status":"parsed","index_status":"failed","chunks":[],
+                 "safety_status":"review_required","index_error":"withdrawal failed",
+                 "safety":{"passed":false,"risk_level":"high","issues":["unsafe"]}}
+                """);
+        AiAgentClient.KnowledgeIngestResult result = client.ingestKnowledgeDocument(
+                new AiAgentClient.KnowledgeDocumentPayload(42, 1, "lesson.md", "text/markdown",
+                        "content".getBytes(StandardCharsets.UTF_8), "lesson.md"));
+        assertThat(result.safetyStatus()).isEqualTo("review_required");
+        assertThat(result.indexError()).isEqualTo("withdrawal failed");
+        assertThat(result.safety().passed()).isFalse();
+    }
+
+    @Test
+    void malformedSafetyBooleanDoesNotPassTheJavaGate() {
+        registerJsonHandler("/resource/generate", 200, """
+                {"safety_status":"passed","resources":[],"evidence":[],"safety":{"passed":"true"}}
+                """);
+        AiAgentClient.AiResourceGenerateResult result = client.generateResource(
+                new ResourceTaskRequest(1, List.of(131), List.of(), null, List.of("lecture"), "basic"), List.of(), Map.of());
+        assertThat(result.safety().passed()).isFalse();
+    }
+
+    @Test
+    void vectorDeletionRequiresExplicitMatchingConfirmationAndSupportsZero() {
+        server.createContext("/kb/documents/42/vectors", exchange -> {
+            assertThat(exchange.getRequestMethod()).isEqualTo("DELETE");
+            assertThat(exchange.getRequestURI().getQuery()).isEqualTo("course_id=1");
+            byte[] response = "{\"document_id\":42,\"course_id\":1,\"deleted_chunks\":0}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        assertThat(client.deleteKnowledgeDocumentVectors(42, 1).deletedChunks()).isZero();
+        registerJsonHandler("/kb/documents/43/vectors", 200,
+                "{\"document_id\":42,\"course_id\":1,\"deleted_chunks\":1}");
+        assertThatThrownBy(() -> client.deleteKnowledgeDocumentVectors(43, 1))
+                .isInstanceOf(ExternalServiceException.class).hasMessageContaining("删除确认");
+    }
+
+    @Test
+    void vectorDeletionHttpFailureIsNotReportedAsSuccess() {
+        registerJsonHandler("/kb/documents/42/vectors", 503, "{\"error\":\"unavailable\"}");
+        assertThatThrownBy(() -> client.deleteKnowledgeDocumentVectors(42, 1))
+                .isInstanceOf(ExternalServiceException.class).hasMessageContaining("撤回文档向量失败");
+    }
+
     private void registerJsonHandler(String path, int status, String json) {
         server.createContext(path, exchange -> {
             requestBodies.put(path, body(exchange));

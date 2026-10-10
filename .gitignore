@@ -73,3 +73,7 @@ tmp/
 
 # Generated Software Cup release candidates
 output/competition-release/
+# Local CI/smoke logs; the reviewed evidence snapshot lives in docs/evidence/.
+output/validation/
+frontend/test-results/
+frontend/playwright-report/

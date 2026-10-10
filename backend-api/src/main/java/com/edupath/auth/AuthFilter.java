@@ -92,7 +92,9 @@ public class AuthFilter extends OncePerRequestFilter {
                 && (path.equals("/api/courses")
                         || path.matches("/api/courses/\\d+/knowledge-points")
                         || path.equals("/api/resources")
-                        || path.matches("/api/resources/[^/]+"))) {
+                        || (path.matches("/api/resources/[^/]+")
+                                && !Set.of("/api/resources/quality-metrics", "/api/resources/quality-repairs")
+                                        .contains(path)))) {
             return true;
         }
         return !path.startsWith("/api/");

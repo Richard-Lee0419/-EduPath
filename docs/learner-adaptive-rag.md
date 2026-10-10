@@ -1,88 +1,46 @@
-# EduPath 学情感知自纠错 RAG
+# 当前检索与个性化边界
 
-## 核心创新
+本文件按公开版本的实际调用链说明检索能力。早期文档中的“混合检索、RRF、学情重排序、自纠错检索已贯通”表述超过了当前实现范围，不作为本项目现有成果。
 
-EduPath 的检索链路不再只使用向量 Top-K，而是实现五个协同能力：
-
-1. **结构感知语义切分**：先识别标题层级、段落、列表、代码围栏、Markdown 表格和公式块，再结合概念锚点与教学角色决定切分边界。代码、表格和公式作为受保护原子，即使超过普通字符窗口也不会被句子规则截断；每个 chunk 保存 `heading_path`、`structure_types`、章节深度、语义签名和前后邻接关系。
-2. **混合检索**：稠密向量检索与 BM25 词法检索并行召回，通过 Reciprocal Rank Fusion 合并排序。
-3. **学情感知重排序**：使用学生薄弱点、学习目标、典型错因和有效难度对候选证据进行教学价值加权。
-4. **自适应 MMR 上下文**：`AdaptiveMmrSelector` 识别 focused、procedural、comparative、exploratory 查询意图，并结合候选冗余度、知识点过滤、薄弱点数量和难度动态计算 MMR λ。聚焦问题提高相关性权重；对比与探索问题提高多样性权重，并为不同结构和不同章节证据增加互补奖励。
-5. **自纠错检索**：`RetrievalCriticAgent` 根据首条证据分数和查询覆盖率判断 `sufficient`、`partial` 或 `insufficient`；证据不足时自动加入画像与教学意图改写查询并重试，仍不足则导师明确拒绝无依据回答。
-
-## 结构感知切分
-
-切分不再按固定字符窗口直接截断，而是经过两级决策：
-
-1. 结构解析器生成 `heading`、`paragraph`、`list`、`code`、`table`、`math` 原子；
-2. 语义边界器综合标题变化、概念锚点 Jaccard、局部词项连贯度和教学角色迁移进行合并。
-
-这保证“算法说明 → 参考代码 → 复杂度分析”在内容允许时保持连续，同时不同章节在标题边界上稳定切开。索引文本会加入标题路径、概念锚点、教学角色和结构类型，使 Dense 与 BM25 都能利用文档结构。
-
-## Adaptive MMR 上下文选择
-
-MMR 基础目标为：
+## 已接入的检索链路
 
 ```text
-MMR(d) = λ × relevance(d) - (1 - λ) × max similarity(d, selected) + structure_bonus(d)
+KnowledgeAgent.retrieve
+  → Retriever.search(course_id, query, top_k, knowledge_point_ids)
+  → VectorStore.search 或 ChromaVectorStore.search
+  → RagEvidence → 生成/辅导/路径等流水线
 ```
 
-- `λ` 动态范围为 0.50–0.86；
-- `structure_bonus` 奖励尚未覆盖的代码、表格、公式或章节路径；
-- 上下文预算根据查询意图、难度和学习节奏在约 1800–4800 字之间自适应；
-- 每条证据返回 `mmr_score` 和 `context_role`，角色包括主相关证据、结构互补证据、多样性扩展证据和支撑证据。
+实际源码位于 `ai-agent-service/app/agents/knowledge_agent.py` 与 `app/rag/`。
 
-## 可解释输出
+| 环节 | 当前实现 | 局限 |
+| --- | --- | --- |
+| 文档切分 | `chunker.py`、`semantic_chunker.py` 使用概念、教学角色和章节信息划分文本，并保留分块 ID 与元数据 | 启发式边界不是经过人工全面标注验证的最佳切分 |
+| local 检索 | 向量相似度及标题、主题、知识点等启发式加分 | 规则分数与 Chroma 分数语义不同；默认哈希 embedding 适合演示与回归 |
+| Chroma 检索 | 课程过滤、embedding 召回，再按知识点过滤和加权 | 先取有限候选再筛知识点可能遗漏结果；质量依赖语料和 embedding |
+| 证据 | 返回 `chunk_id`、标题、内容、来源与 score；知识库结果还可携带作者、链接、许可状态、章节路径 | 分数不是结论正确率，也不是学习效果 |
 
-每条证据返回：
+语料来源与许可见 [开放知识库说明](open-source-knowledge-base.md)。分块元数据不代表所有字段都贯通每一种前端资源接口，应以 API 契约和对应 schema 为准。
 
-- `dense_score`：向量相关度；
-- `lexical_score`：BM25 相关度；
-- `fusion_score`：RRF 融合分；
-- `personalization_score`：学情增益分；
-- `mmr_score`：自适应 MMR 选择分；
-- `retrieval_reasons`：匹配薄弱点、学习目标、错因补救或难度的解释。
-- `context_role`：该证据在最终上下文中的作用；
-- `structure_types` / `heading_path`：结构类型和章节路径。
+## 尚未接入的独立实现
 
-每次检索返回 `retrieval` / `diagnostics`：
+- `app/rag/lexical_retrieval.py` 提供 `bm25_scores`；当前 `Retriever.search` 没有调用它。
+- `app/rag/context_selector.py` 提供 `AdaptiveMmrSelector`；当前应用检索入口没有调用它。
+- 当前调用链没有 RRF 融合、专门的画像重排序或 RetrievalCritic 查询重写循环。
 
-```json
-{
-  "status": "sufficient",
-  "original_query": "二叉树递归遍历",
-  "effective_query": "二叉树递归遍历",
-  "attempts": 1,
-  "strategies": ["structure_aware_chunking", "dense", "bm25", "rrf", "learner_rerank", "adaptive_mmr"],
-  "top_score": 0.93,
-  "query_coverage": 0.81,
-  "evidence_count": 3,
-  "chunking_strategy": "structure_aware_semantic_v2",
-  "query_intent": "procedural",
-  "mmr_lambda": 0.70,
-  "candidate_count": 12,
-  "redundancy_before": 0.58,
-  "diversity_after": 0.79,
-  "context_budget_chars": 3040,
-  "selected_context_chars": 2486,
-  "message": "检索证据充分，可进行基于证据的生成。"
-}
-```
+这些文件是可进一步集成和验证的原型，不能据此宣称线上正在使用混合检索、MMR 去冗或自纠错检索。本次收尾不为增加技术名词而接入它们。
 
-这些字段已贯通资源生成、资源持久化与详情、知识库搜索、智能导师、Java 长任务进度和 Vue 页面。登录用户的画像由 Java 后端读取并注入，前端不直接提交身份画像，从而保证个性化排序使用可信用户上下文。
+## 个性化实际发生在哪里
 
-## 比赛演示建议
+Java 读取用户画像、作答和路径状态，传递给相应 Python 流水线。资源规划与生成、路径安排、练习评估使用目标、薄弱点、偏好、难度或时间预算；`services/personalization.py` 整理相关上下文。
 
-- 用精确术语问题展示 BM25 与向量召回的互补结果。
-- 上传同时包含章节标题、代码、表格和公式的课程资料，展示结构单元完整保留及章节路径。
-- 对同一主题分别输入聚焦问题和对比问题，展示 MMR λ、上下文预算和证据多样性变化。
-- 使用两个薄弱点不同的画像查询同一主题，展示证据顺序和 `retrieval_reasons` 的差异。
-- 输入知识库外问题，展示查询自动改写两次后由 `RetrievalCriticAgent` 阻止无证据回答。
+当前检索函数本身接收课程、查询和知识点 ID，而非完整学习画像。画像影响请求与下游生成，不等于实现了画像感知的候选重排序。测验后的画像/路径版本变化可验证机制响应，不能证明学习收益。
 
-## 评测指标
+## 如何验证与如何解释结果
 
-- 检索：Recall@K、MRR、nDCG@K、候选冗余度、上下文多样性；
-- 切分：结构完整率、标题路径准确率、跨章节污染率；
-- 证据：查询覆盖率、证据支持率、拒答准确率；
-- 教学：使用证据后的测验正确率与掌握度增量；
-- 工程：检索延迟、重试率和单次检索成本。
+1. 先记录实际语料、embedding、向量提供方和版本，再执行现有语料构建与检索评测工具。
+2. 核对 golden query 的正确证据是否在 Top-K 内，并人工检查它是否直接支持要生成的结论。
+3. 若比较 local 与真实 embedding，使用相同语料和查询集；不要把一次模式的分数作为另一种模式的提升基线。
+4. 如要研究 BM25/MMR，需要先接入调用链，再做固定查询集对照及失败分析；本仓库当前没有该实验结论。
+
+数据工作区说明见 [课程语料工作区](../ai-agent-service/data/course_corpus/README.md)。缺失原始资料的历史报告、规则评分或自动化测试通过，都不能作为正式用户实验或教学效果证据。
