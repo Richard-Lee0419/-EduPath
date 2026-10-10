@@ -1,0 +1,52 @@
+{
+  "status": "passed",
+  "verified_at_utc": "2026-10-10T16:47:06.729055+00:00",
+  "scope": "real Java-to-AI HTTP, deterministic fallback; isolated local database required",
+  "vector_provider": "chroma",
+  "limitations": [
+    "not a real-model quality evaluation",
+    "not browser verification",
+    "database backend not independently identified by this script; no cloud deployment verification"
+  ],
+  "duration_seconds": 4.081,
+  "stages": [
+    {
+      "stage": "profile",
+      "task_id": "task_profile_7bb2a75a2ca742aaadf8a2f223c36577",
+      "status": "success",
+      "generation_mode": "deterministic_fallback"
+    },
+    {
+      "stage": "resources",
+      "task_id": "task_resource_b7dcc3e1eab14abdbf79500ebc1b7e61",
+      "status": "success",
+      "generation_mode": "deterministic_fallback"
+    },
+    {
+      "stage": "path",
+      "task_id": "task_path_0d00057793c44af08f8cb455651de2b2",
+      "status": "success",
+      "generation_mode": "deterministic_fallback"
+    },
+    {
+      "stage": "quiz",
+      "task_id": "task_quiz_04ce59eacc2c4533a568dc53ab3f668f",
+      "status": "success",
+      "generation_mode": "deterministic_fallback"
+    },
+    {
+      "stage": "evaluation",
+      "task_id": "task_evaluation_93513b06bf28464fa4f2539782ab3a3e",
+      "status": "success",
+      "generation_mode": "deterministic_fallback"
+    }
+  ],
+  "resource_count": 3,
+  "question_count": 3,
+  "score": 0,
+  "profile_version_before": 1,
+  "profile_version_after": 2,
+  "path_version_before": 1,
+  "path_version_after": 2,
+  "model_calls": 0
+}

@@ -24,16 +24,18 @@ const evidenceSnippets = ref<
     containsExamples: boolean;
   }>
 >([]);
-const documents = ref<Array<{ title: string; state: string; tone: 'doc' | 'slide' | 'task'; builtIn?: boolean }>>([]);
+const documents = ref<Array<{ title: string; state: string; indexStatus: string; tone: 'doc' | 'slide' | 'task'; builtIn?: boolean }>>([]);
 const searchQuery = ref('');
 const corpusSummary = ref<KnowledgeCorpusSummary | null>(null);
 const loading = ref(true);
 const uploading = ref(false);
 const errorMessage = ref('');
+const uploadErrorMessage = ref('');
+const visibleErrorMessage = computed(() => [uploadErrorMessage.value, errorMessage.value].filter(Boolean).join('；'));
 const fileInput = ref<HTMLInputElement | null>(null);
 
 const canManageKnowledgeBase = computed(() => props.user?.role === 'teacher' || props.user?.role === 'admin');
-const indexedCount = computed(() => documents.value.filter((doc) => doc.state.includes('indexed') || doc.state.includes('已索引')).length);
+const indexedCount = computed(() => documents.value.filter((doc) => doc.indexStatus === 'indexed').length);
 const searchableMaterialCount = computed(() => {
   if (indexedCount.value > 0) return indexedCount.value;
   return new Set(evidenceSnippets.value.map((item) => item.source || item.chapter)).size;
@@ -101,6 +103,7 @@ const loadKnowledgeBase = async () => {
     documents.value = docRows.map((doc, index) => ({
       title: doc.filename,
       state: `${doc.parse_status} / ${doc.index_status}`,
+      indexStatus: doc.index_status,
       tone: index % 3 === 0 ? 'doc' : index % 3 === 1 ? 'slide' : 'task',
     }));
     corpusSummary.value = search.corpus;
@@ -126,6 +129,7 @@ const submitSearch = async () => {
 };
 
 const selectCourse = async (courseId: number) => {
+  uploadErrorMessage.value = '';
   selectedCourseId.value = courseId;
   await loadKnowledgeBase();
 };
@@ -146,8 +150,15 @@ const handleUpload = async (event: Event) => {
   }
   uploading.value = true;
   errorMessage.value = '';
+  uploadErrorMessage.value = '';
   try {
-    await uploadKnowledgeDocument(selectedCourseId.value, file);
+    const result = await uploadKnowledgeDocument(selectedCourseId.value, file);
+    if (result.index_status !== 'indexed' || result.safety_status !== 'passed' || result.index_error) {
+      const reason = result.index_error || (result.safety_status !== 'passed'
+        ? '资料未通过安全审核，请检查内容后重试'
+        : '资料尚未完成索引，请稍后重试');
+      uploadErrorMessage.value = `已保留上传记录，资料未进入可检索知识库：${reason}`;
+    }
     await loadKnowledgeBase();
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '上传失败';
@@ -219,7 +230,7 @@ onMounted(async () => {
       <p>当前：{{ corpusModeLabel }} · {{ corpusSummary?.external_documents ?? 0 }} 份外部资料 · {{ corpusSummary?.chunks ?? 0 }} 个语义片段</p>
     </form>
 
-    <section v-if="errorMessage" class="kb-error interactive-card">{{ errorMessage }}</section>
+    <section v-if="visibleErrorMessage" class="kb-error interactive-card" role="alert">{{ visibleErrorMessage }}</section>
 
     <section class="kb-layout">
       <main class="kb-main">

@@ -1,3 +1,5 @@
+// Source-level contract guards. These checks do not send HTTP requests or prove
+// that a running API works; scripts/smoke_learning_flow.py covers that boundary.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -85,7 +87,7 @@ const checks = [
   {
     path: 'src/api/quiz.ts',
     forbidden: ['question_count: payload.questionCount ?? 5', '../mock/data', 'mockOrRequest'],
-    required: ['questionCount ?? 3', 'questionCount > 3', "apiPost<RawMap>('/quiz/generate'", 'model_runtime', 'evidence_chunk_ids', 'path_update', 'source_evaluation_task_id'],
+    required: ['questionCount ?? 3', 'questionCount > 3', "apiPost<TaskCreated>('/quiz/generate'", 'model_runtime', 'evidence_chunk_ids', 'path_update', 'source_evaluation_task_id'],
   },
   {
     path: 'src/pages/ProfileChat.vue',

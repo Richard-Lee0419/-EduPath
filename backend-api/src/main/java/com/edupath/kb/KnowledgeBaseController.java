@@ -74,14 +74,14 @@ public class KnowledgeBaseController {
     public ApiResponse<KnowledgeDocumentRepository.DocumentRow> updateStatus(
             @PathVariable long documentId,
             @RequestBody KnowledgeBaseService.DocumentStatusUpdateRequest request) {
-        roleGuard.requireAny("teacher", "admin");
+        roleGuard.requireCourseManager(knowledgeBaseService.documentCourseId(documentId));
         return ApiResponse.success(knowledgeBaseService.updateDocumentStatus(documentId, request));
     }
 
     @PostMapping("/documents/{documentId}/reindex")
     @Operation(summary = "重建文档索引任务")
     public ApiResponse<AgentTaskService.TaskCreatedResponse> reindex(@PathVariable long documentId) {
-        roleGuard.requireAny("teacher", "admin");
+        roleGuard.requireCourseManager(knowledgeBaseService.documentCourseId(documentId));
         var plans = List.of(
                 new AgentTaskService.AgentStepPlan("KnowledgeAgent", "正在读取文档元数据", "已读取文档元数据"),
                 new AgentTaskService.AgentStepPlan("KnowledgeAgent", "正在重建向量索引", "已重建向量索引"),
@@ -101,14 +101,13 @@ public class KnowledgeBaseController {
                     progress.success("SafetyAgent", "索引检查通过", 96);
                     return result;
                 });
-        knowledgeBaseService.createIndexJob(documentId, response.taskId(), "queued", "等待重建索引任务执行");
         return ApiResponse.success(response);
     }
 
     @DeleteMapping("/documents/{documentId}")
     @Operation(summary = "删除知识库文档")
     public ApiResponse<Void> delete(@PathVariable long documentId) {
-        roleGuard.requireAny("teacher", "admin");
+        roleGuard.requireCourseManager(knowledgeBaseService.documentCourseId(documentId));
         knowledgeBaseService.deleteDocument(documentId);
         return ApiResponse.success(null);
     }

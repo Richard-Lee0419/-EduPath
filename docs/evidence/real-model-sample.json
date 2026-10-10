@@ -1,0 +1,46 @@
+{
+  "verified_at_utc": "2026-10-10T16:00:17.0000000Z",
+  "status": "partial_or_failed",
+  "maximum_tasks": 2,
+  "stages": [
+    {
+      "stage": "profile",
+      "status": "passed",
+      "task_id": "task_profile_381c79381ece48ae800415c10dba01d5",
+      "task_status": "success",
+      "model_runtime": {
+        "mode": "real_model",
+        "provider": "deepseek",
+        "model": "deepseek-chat",
+        "configured": true,
+        "real_model_used": true,
+        "call_count": 2,
+        "total_tokens": 1159
+      },
+      "safety_passed": true,
+      "profile_version": 1,
+      "duration_seconds": 3.362
+    },
+    {
+      "stage": "lecture_resource",
+      "status": "failed",
+      "task_id": "task_resource_52c8db38d7174a9291af50faa3d5123f",
+      "task_status": "failed",
+      "model_runtime": {},
+      "safety_passed": null,
+      "error_type": "AssertionError",
+      "reason": "task did not succeed",
+      "duration_seconds": 17.301,
+      "failure_stage": "LectureAgent",
+      "observed_error": "LLM JSON output was truncated; increase LLM_MAX_OUTPUT_TOKENS",
+      "validation_output_limit": 2200,
+      "project_default_output_limit": 8192,
+      "failure_source": "AI task step and llm_call log; no complete model_runtime on failed task"
+    }
+  ],
+  "limitations": [
+    "two synthetic tasks; no user study or model-quality benchmark",
+    "local hash embeddings and local vectors; no live embedding verification",
+    "not a complete real-model quiz/evaluation learning loop"
+  ]
+}

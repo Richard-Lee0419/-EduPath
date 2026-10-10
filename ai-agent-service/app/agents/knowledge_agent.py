@@ -1,3 +1,4 @@
+from app.rag.chunker import RagChunk
 from app.rag.retriever import RagEvidence, Retriever, retriever
 
 
@@ -50,3 +51,32 @@ class KnowledgeAgent:
             content=content,
             source=source,
         )
+
+    def prepare_uploaded_document(
+        self,
+        *,
+        document_id: int,
+        course_id: int,
+        course_code: str,
+        knowledge_point_id: int,
+        knowledge_point: str,
+        title: str,
+        content: str,
+        source: str,
+    ) -> list[RagChunk]:
+        return self.retriever.prepare_uploaded_document(
+            document_id=document_id, course_id=course_id, course_code=course_code,
+            knowledge_point_id=knowledge_point_id, knowledge_point=knowledge_point,
+            title=title, content=content, source=source,
+        )
+
+    def uploaded_chunk_evidence(self, chunks: list[RagChunk]) -> list[RagEvidence]:
+        return self.retriever.uploaded_document_evidence(chunks)
+
+    def replace_uploaded_chunks(self, *, course_id: int, document_id: int, chunks: list[RagChunk]) -> int:
+        return self.retriever.replace_uploaded_document_chunks(
+            course_id=course_id, document_id=document_id, chunks=chunks,
+        )
+
+    def delete_uploaded_chunks(self, *, course_id: int, document_id: int) -> int:
+        return self.retriever.delete_uploaded_document(course_id=course_id, document_id=document_id)

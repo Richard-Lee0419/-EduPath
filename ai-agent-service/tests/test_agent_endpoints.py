@@ -426,7 +426,8 @@ def test_uploaded_document_is_ingested_into_rag_search():
     assert ingest["parse_status"] == "parsed"
     assert ingest["index_status"] == "indexed"
     assert ingest["chunks"][0]["chunk_id"].startswith("kb_9001_")
-    assert ingest["task"]["steps"][-1]["agent"] == "SafetyAgent"
+    agents = ingest["task"]["planned_agents"]
+    assert agents.index("SafetyAgent") < agents.index("EmbeddingAgent")
     assert ingest["task"]["progress"] == 100
 
     search_response = client.post("/kb/search", json={"course_id": 1, "query": "AVL 四类旋转触发条件", "top_k": 1})

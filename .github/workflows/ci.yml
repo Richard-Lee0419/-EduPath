@@ -1,0 +1,108 @@
+name: Verify EduPath
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm test && npm run type-check && npm run build
+        working-directory: frontend
+      - name: Check shell syntax and deployment template
+        run: |
+          bash -n scripts/verify-all.sh scripts/verify-production.sh scripts/production-readiness-check.sh scripts/ci-learning-flow.sh scripts/ci-docker-flow.sh
+          bash scripts/production-readiness-check.sh
+          docker compose config --quiet
+
+  backend-ai:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      EDUPATH_ENV: dev
+      VECTOR_STORE_PROVIDER: local
+      EMBEDDING_PROVIDER: local
+      EMBEDDING_MODEL: local-hash-v1
+      EMBEDDING_STRICT: 'false'
+      COMPETITION_MODE: 'false'
+      LLM_PROVIDER: ''
+      LLM_BASE_URL: ''
+      LLM_MODEL: ''
+      LLM_API_KEY: ''
+      EMAIL_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          cache-dependency-path: backend-api/pom.xml
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: ai-agent-service/pyproject.toml
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci && npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: python -m pip install -e '.[dev]'
+        working-directory: ai-agent-service
+      - run: python -m pytest
+        working-directory: ai-agent-service
+      - run: python -m pytest scripts/tests
+      - run: mvn --batch-mode package
+        working-directory: backend-api
+      - name: Verify real HTTP and browser learning flows in deterministic mode
+        env:
+          EDUPATH_BROWSER_TESTS: 'true'
+        run: bash scripts/ci-learning-flow.sh
+      - name: Attach reports and local flow evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-ai-validation
+          path: |
+            backend-api/target/surefire-reports/
+            output/validation/
+            frontend/test-results/
+            frontend/playwright-report/
+
+  docker-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Verify development Compose with MySQL and Chroma
+        run: bash scripts/ci-docker-flow.sh
+      - name: Attach container logs and flow evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: docker-integration-validation
+          path: output/validation/

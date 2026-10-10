@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlparse
 
-from app.rag.chunker import RagChunk
+from app.rag.chunker import RagChunk, uploaded_chunk_id_prefix
 from app.rag.embeddings import EmbeddingClient
 from app.rag.vector_store import SearchHit, _indexed_text
 
@@ -17,12 +17,13 @@ class ChromaVectorStore:
         chroma_url: str = "http://localhost:8001",
         collection_name: str = "edupath_course_chunks",
         batch_size: int = 64,
+        collection: Any | None = None,
     ) -> None:
         self.embedding_client = embedding_client or EmbeddingClient()
         self.chroma_url = chroma_url
         self.collection_name = collection_name
         self.batch_size = max(1, batch_size)
-        self._collection: Any | None = None
+        self._collection: Any | None = collection
 
     def upsert_chunks(self, chunks: list[RagChunk]) -> None:
         if not chunks:
@@ -46,16 +47,69 @@ class ChromaVectorStore:
     ) -> list[SearchHit]:
         collection = self._get_collection()
         query_embedding = self.embedding_client.embed_dense(query)
+        requested_points = set(knowledge_point_ids or [])
+        where: dict[str, Any] = {"course_id": course_id}
+        if requested_points:
+            # Filter before ANN ranking: unrelated nearest neighbours must not
+            # consume the whole candidate budget. Existing related IDs are pipe-
+            # encoded metadata, so collect their matching values without changing
+            # the persisted format or requiring old documents to be reindexed.
+            scoped = collection.get(where={"course_id": course_id}, include=["metadatas"])
+            related_values = {
+                str(metadata.get("related_knowledge_point_ids"))
+                for metadata in _first(scoped.get("metadatas"))
+                if metadata and requested_points.intersection(
+                    int(value) for value in str(metadata.get("related_knowledge_point_ids") or "").split("|") if value
+                )
+            }
+            point_filters: list[dict[str, Any]] = [
+                {"knowledge_point_id": {"$in": sorted(requested_points)}}
+            ]
+            if related_values:
+                point_filters.append({"related_knowledge_point_ids": {"$in": sorted(related_values)}})
+            where = {"$and": [
+                {"course_id": course_id},
+                point_filters[0] if len(point_filters) == 1 else {"$or": point_filters},
+            ]}
         result = collection.query(
             query_embeddings=[query_embedding],
             n_results=max(1, min(top_k * 3, 30)),
-            where={"course_id": course_id},
+            where=where,
             include=["documents", "metadatas", "distances"],
         )
-        requested_points = set(knowledge_point_ids or [])
         hits = self._to_hits(result, requested_points)
         hits.sort(key=lambda item: item.score, reverse=True)
         return hits[: max(1, min(top_k, 10))]
+
+    def delete_document_chunks(self, course_id: int, document_id: int) -> int:
+        collection = self._get_collection()
+        owned = collection.get(where={"$and": [{"course_id": course_id}, {"document_id": document_id}]})
+        target_ids = {str(chunk_id) for chunk_id in _first(owned.get("ids"))}
+        # Older uploads lack document_id metadata; use exact course and prefix.
+        scoped = collection.get(where={"course_id": course_id}, include=["metadatas"])
+        prefix = uploaded_chunk_id_prefix(document_id)
+        metadatas = _first(scoped.get("metadatas"))
+        for index, chunk_id in enumerate(_first(scoped.get("ids"))):
+            metadata = metadatas[index] if index < len(metadatas) else {}
+            if metadata and metadata.get("document_id") is not None:
+                continue
+            if str(chunk_id).startswith(prefix):
+                target_ids.add(str(chunk_id))
+        if target_ids:
+            collection.delete(ids=sorted(target_ids))
+        return len(target_ids)
+
+    def replace_document_chunks(self, course_id: int, document_id: int, chunks: list[RagChunk]) -> int:
+        removed = self.delete_document_chunks(course_id, document_id)
+        try:
+            self.upsert_chunks(chunks)
+        except Exception as write_error:
+            try:
+                self.delete_document_chunks(course_id, document_id)
+            except Exception as cleanup_error:
+                raise RuntimeError(f"{write_error}；部分向量清理失败：{cleanup_error}") from write_error
+            raise
+        return removed
 
     def _get_collection(self) -> Any:
         if self._collection is not None:
@@ -131,7 +185,7 @@ def _first(value: Any) -> list[Any]:
 
 
 def _chunk_metadata(chunk: RagChunk) -> dict[str, str | int]:
-    return {
+    metadata: dict[str, str | int] = {
         "course_id": chunk.course_id,
         "course_code": chunk.course_code,
         "knowledge_point_id": chunk.knowledge_point_id,
@@ -154,3 +208,6 @@ def _chunk_metadata(chunk: RagChunk) -> dict[str, str | int]:
         "language": chunk.language,
         "contains_examples": int(chunk.contains_examples),
     }
+    if chunk.document_id is not None:
+        metadata["document_id"] = chunk.document_id
+    return metadata

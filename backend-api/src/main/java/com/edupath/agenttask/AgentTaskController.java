@@ -1,6 +1,7 @@
 package com.edupath.agenttask;
 
 import com.edupath.ai.AiAgentClient;
+import com.edupath.auth.RoleGuard;
 import com.edupath.common.ApiResponse;
 import com.edupath.kb.KnowledgeBaseService;
 import com.edupath.path.LearningPathService;
@@ -45,6 +46,7 @@ public class AgentTaskController {
     private final KnowledgeBaseService knowledgeBaseService;
     private final AiAgentClient aiAgentClient;
     private final ObjectMapper objectMapper;
+    private final RoleGuard roleGuard;
 
     public AgentTaskController(
             AgentTaskService agentTaskService,
@@ -55,7 +57,8 @@ public class AgentTaskController {
             TutorService tutorService,
             KnowledgeBaseService knowledgeBaseService,
             AiAgentClient aiAgentClient,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            RoleGuard roleGuard) {
         this.agentTaskService = agentTaskService;
         this.resourceService = resourceService;
         this.resourceQualityRegressionService = resourceQualityRegressionService;
@@ -65,6 +68,7 @@ public class AgentTaskController {
         this.knowledgeBaseService = knowledgeBaseService;
         this.aiAgentClient = aiAgentClient;
         this.objectMapper = objectMapper;
+        this.roleGuard = roleGuard;
     }
 
     @PostMapping("/resource-task")
@@ -298,6 +302,7 @@ public class AgentTaskController {
             throws JsonProcessingException {
         Map<?, ?> payload = objectMapper.readValue(requestPayload, Map.class);
         long documentId = Long.parseLong(String.valueOf(payload.get("document_id")));
+        roleGuard.requireCourseManager(knowledgeBaseService.documentCourseId(documentId));
         var plans = List.of(
                 new AgentTaskService.AgentStepPlan("KnowledgeAgent", "正在读取文档元数据", "已读取文档元数据"),
                 new AgentTaskService.AgentStepPlan("KnowledgeAgent", "正在重建向量索引", "已重建向量索引"),
@@ -317,7 +322,6 @@ public class AgentTaskController {
                     progress.success("SafetyAgent", "索引检查通过", 96);
                     return result;
                 });
-        knowledgeBaseService.createIndexJob(documentId, response.taskId(), "queued", "重试重建索引");
         return ApiResponse.success(response);
     }
 }

@@ -163,7 +163,25 @@ public class AiAgentClient {
                 asString(first(response, "parse_status", "parseStatus")),
                 asString(first(response, "index_status", "indexStatus")),
                 knowledgeChunks(first(response, "chunks")),
-                aiSafety(first(response, "safety")));
+                aiSafety(first(response, "safety")),
+                asString(first(response, "safety_status", "safetyStatus")),
+                asString(first(response, "index_error", "indexError")));
+    }
+
+    public KnowledgeVectorDeleteResult deleteKnowledgeDocumentVectors(long documentId, long courseId) {
+        String uri = "/kb/documents/" + documentId + "/vectors?course_id=" + courseId;
+        try {
+            Map<String, Object> response = restClient.delete().uri(uri).retrieve().body(MAP_RESPONSE);
+            Integer deleted = response == null ? null : asInteger(response.get("deleted_chunks"));
+            if (deleted == null || deleted < 0
+                    || !String.valueOf(documentId).equals(asString(response.get("document_id")))
+                    || !String.valueOf(courseId).equals(asString(response.get("course_id")))) {
+                throw new ExternalServiceException("AI 服务", "向量撤回接口未返回匹配的删除确认");
+            }
+            return new KnowledgeVectorDeleteResult(documentId, courseId, deleted);
+        } catch (RestClientException exception) {
+            throw new ExternalServiceException("AI 服务", "撤回文档向量失败: " + documentId, exception);
+        }
     }
 
     public Map<String, Object> extractProfile(ProfileChatRequest request) {
@@ -357,7 +375,7 @@ public class AiAgentClient {
         }
         Map<String, Object> map = normalizeMap(rawMap);
         return new AiSafety(
-                asBoolean(first(map, "passed")),
+                Boolean.TRUE.equals(first(map, "passed")),
                 asString(first(map, "risk_level", "riskLevel")),
                 asStringList(first(map, "issues")),
                 asStringList(first(map, "suggestions")),
@@ -395,13 +413,6 @@ public class AiAgentClient {
             }
         }
         return null;
-    }
-
-    private boolean asBoolean(Object value) {
-        if (value instanceof Boolean bool) {
-            return bool;
-        }
-        return Boolean.parseBoolean(asString(value));
     }
 
     private double asDouble(Object value) {
@@ -512,5 +523,15 @@ public class AiAgentClient {
             String parseStatus,
             String indexStatus,
             List<KnowledgeChunk> chunks,
-            AiSafety safety) {}
+            AiSafety safety,
+            String safetyStatus,
+            String indexError) {
+        public KnowledgeIngestResult(String taskId, String parseStatus, String indexStatus,
+                List<KnowledgeChunk> chunks, AiSafety safety) {
+            this(taskId, parseStatus, indexStatus, chunks, safety,
+                    safety != null && safety.passed() ? "passed" : "review_required", "");
+        }
+    }
+
+    public record KnowledgeVectorDeleteResult(long documentId, long courseId, int deletedChunks) {}
 }

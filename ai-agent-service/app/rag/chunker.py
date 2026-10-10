@@ -32,6 +32,13 @@ class RagChunk:
     document_type: str = "lecture"
     language: str = ""
     contains_examples: bool = False
+    document_id: int | None = None
+
+
+def uploaded_chunk_id_prefix(document_id: int) -> str:
+    """Exact uploaded-document prefix; kb_1_ must not match kb_12_."""
+
+    return f"kb_{document_id}_"
 
 
 class Chunker:
@@ -53,9 +60,15 @@ class Chunker:
         return chunks
 
     def chunk_uploaded_document(self, document: SourceDocument, document_id: int) -> list[RagChunk]:
-        return self._chunk_document(document, id_prefix=f"kb_{document_id}")
+        return self._chunk_document(
+            document,
+            id_prefix=uploaded_chunk_id_prefix(document_id).rstrip("_"),
+            document_id=document_id,
+        )
 
-    def _chunk_document(self, document: SourceDocument, id_prefix: str) -> list[RagChunk]:
+    def _chunk_document(
+        self, document: SourceDocument, id_prefix: str, document_id: int | None = None
+    ) -> list[RagChunk]:
         specs = self.semantic_chunker.split(document.title, document.content)
         chunk_ids = [f"{id_prefix}_{index}" for index in range(1, len(specs) + 1)]
         chunks: list[RagChunk] = []
@@ -89,6 +102,7 @@ class Chunker:
                     document_type=document.document_type,
                     language=document.language,
                     contains_examples=document.contains_examples or "example" in spec.roles or "exercise" in spec.roles,
+                    document_id=document_id,
                 )
             )
         return chunks

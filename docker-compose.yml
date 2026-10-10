@@ -1,16 +1,20 @@
+name: edupath-dev
+
 services:
   frontend:
-    image: node:22-alpine
+    image: node:24-alpine
     working_dir: /app
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
     env_file:
       - .env.example
     environment:
-      VITE_API_BASE_URL: http://localhost:8080/api
+      VITE_API_BASE_URL: /api
+      VITE_PROXY_TARGET: http://backend-api:8080
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
     volumes:
       - ./frontend:/app
+      - frontend-dependencies:/app/node_modules
     depends_on:
       - backend-api
 
@@ -23,14 +27,19 @@ services:
     environment:
       SERVER_PORT: 8080
       AI_SERVICE_BASE_URL: http://ai-agent-service:8000
+      DB_URL: jdbc:mysql://mysql:3306/edupath?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      DB_USERNAME: edupath
+      DB_PASSWORD: edupath_dev_password
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./backend-api:/app
+      - maven-cache:/root/.m2
     depends_on:
-      - mysql
-      - redis
-      - ai-agent-service
+      mysql:
+        condition: service_healthy
+      ai-agent-service:
+        condition: service_healthy
 
   ai-agent-service:
     image: python:3.12-slim
@@ -42,14 +51,20 @@ services:
       VECTOR_STORE_PROVIDER: chroma
       CHROMA_URL: http://chroma:8000
       CHROMA_COLLECTION: edupath_course_chunks
-      REDIS_URL: redis://redis:6379/0
+      EDUPATH_SEED_CORPUS_PATH: /app/data/seed_corpus/seed_documents.jsonl
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./ai-agent-service:/app
     depends_on:
-      - redis
-      - chroma
+      chroma:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
 
   mysql:
     image: mysql:8.4
@@ -59,22 +74,31 @@ services:
       MYSQL_PASSWORD: edupath_dev_password
       MYSQL_ROOT_PASSWORD: edupath_root_password
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
 
   chroma:
-    image: chromadb/chroma:latest
+    image: chromadb/chroma:0.5.23
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     volumes:
       - chroma-data:/chroma/chroma
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/heartbeat', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
 volumes:
   mysql-data:
   chroma-data:
+  frontend-dependencies:
+  maven-cache:

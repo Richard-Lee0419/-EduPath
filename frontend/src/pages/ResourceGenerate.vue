@@ -6,6 +6,7 @@ import DfsTraversalVisualizer from '../components/resource/DfsTraversalVisualize
 import SplitText from '../components/SplitText.vue';
 import ResourceDetailRenderer from '../components/ResourceDetailRenderer.vue';
 import { getCourses } from '../api/course';
+import { getStoredUser } from '../api/auth';
 import { getCurrentProfile } from '../api/profile';
 import { generateResources, getResourceDetail, listResources, recordResourceInteraction, resourcesFromTask } from '../api/resource';
 import { isAbortError, waitForAgentTask } from '../api/task';
@@ -70,6 +71,7 @@ const courses = ref<Array<{ id: number; name: string }>>([]);
 const selectedCourseId = ref<number | null>(null);
 const modelRuntime = ref<ModelRuntime | null>(null);
 const qualityRefreshToken = ref(0);
+const canManageResourceQuality = computed(() => ['teacher', 'admin'].includes(getStoredUser()?.role || ''));
 const selectedResourceTypes = ref<Array<ResourceCard['type']>>(SELECTABLE_RESOURCE_TYPES.map((item) => item.value));
 const selectedDifficulty = ref<'basic' | 'medium' | 'advanced'>('medium');
 
@@ -545,7 +547,7 @@ onUnmounted(() => {
       </article>
     </section>
 
-    <ResourceQualityDashboard :course-id="selectedCourseId" :refresh-token="qualityRefreshToken" />
+    <ResourceQualityDashboard v-if="canManageResourceQuality" :course-id="selectedCourseId" :refresh-token="qualityRefreshToken" />
 
     <section class="resource-pack">
       <div class="section-title-row">

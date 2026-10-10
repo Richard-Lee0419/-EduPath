@@ -1,148 +1,149 @@
 # 知径 EduPath
-面向高校专业课程的个性化学习平台。EduPath 将「判断学习起点—检索课程证据—生成适配资源—规划学习路径—练习评估—调整下一步」连接为持续更新的学习闭环，同时为教师提供班级洞察和教学任务支持。
 
-**在线体验：** [https://8.136.194.87/](https://8.136.194.87/)（已部署至云服务器，可直接访问 Web 应用）。
+面向《数据结构与算法》《计算机组成原理》的学习 Web 应用，将学习画像、课程证据检索、资源生成、路径规划和测验反馈连接起来。学生可从具体薄弱点开始学习，查看生成内容的依据，再用练习结果调整下一步；教师端提供班级洞察、教学任务和课程资料管理。
 
-> 当前代码包含可运行的学生端、教师端、Spring Boot 业务服务和 FastAPI 智能体服务。默认开发配置支持本地体验；自行接入真实大模型或重新部署时，需要配置相应凭据和数据服务。仓库不包含私有课程资料或生产密钥。
+这是软件杯 A3 团队项目的个人公开版本，由团队快照整理后持续维护。Richard-Lee0419 主要负责前端/UI与 AI 模块，并参与后端；部署主要由队友完成。代码基础、个人扩展和代表性提交见 [贡献说明](CONTRIBUTIONS.md)。
+
+**快速入口：** [核心流程视频](docs/evidence/core-learning-flow.webm) · [演示说明](docs/demo-guide.md) · [验证记录](docs/validation-report.md) · [设计取舍](docs/engineering-decisions.md) · [原在线实例](https://8.136.194.87/) · [旧版介绍存档](docs/history/README-before-portfolio-review.md)
+
+> 视频来自本仓库本地代码，使用合成账号和确定性开发模式，实际执行网页操作与跨服务请求。原在线实例可能与仓库版本不同。小规模真实模型验证中，画像通过，讲义因本次较低输出上限导致 JSON 截断，详见验证记录。项目没有已验证的学习成绩提升或正式用户研究结论。
+
+![本地浏览器生成的三类资源](docs/evidence/demo-resource-package.png)
 
 ## 解决的问题
 
 课程学习常常不是缺少资料，而是缺少与个人基础相匹配的资料和清晰的学习顺序。EduPath 以可修正的学习画像记录目标、薄弱点、偏好与时间预算，用课程知识库约束内容生成，再让测验结果回流画像与路径，避免一次性推荐之后学习状态不再变化。
 
-## 主要功能
+## 核心流程与当前范围
 
-| 场景 | 当前能力 |
+```text
+学习目标与自述 → 版本化画像 → 课程证据 → 资源与学习路径
+                                          ↓
+下一步调整 ← 画像/路径更新 ← 作答与评估 ← 学习和练习
+```
+
+| 场景 | 当前实现 |
 | --- | --- |
-| 学习画像 | 从学习目标和自述信息提取画像，支持版本化更新与依据查看。 |
-| 课程资源 | 生成并管理六类资源：个性化讲义、思维导图、题库、代码实验、流程图、拓展阅读。 |
-| 学习路径 | 结合画像、课程证据和时间预算规划学习顺序，并根据练习结果调整。 |
-| 智能辅导 | 围绕课程知识点与检索证据回答问题，保留来源与安全审查结果。 |
-| 测验评估 | 记录作答、识别薄弱点、生成反馈，支持补救学习与复测。 |
-| 教师工作台 | 查看班级与学生学习情况，管理班级、教学任务和知识库资料。 |
-| 可观察任务 | 长任务提供任务 ID、进度、事件流、取消与恢复能力，前端展示易理解的处理状态。 |
+| 学习画像 | 根据输入提取目标、薄弱点、偏好与时间预算，保存画像版本与更新依据。 |
+| 资源学习 | 生成个性化讲义、思维导图、题库、代码实验、流程图、拓展阅读，展示结构化内容与课程证据。 |
+| 路径与辅导 | 规划学习顺序，基于检索内容辅导；练习反馈可触发路径调整。 |
+| 测验评估 | 保存题目与作答，形成评估，并关联画像与路径变化。 |
+| 教师支持 | 班级洞察、教学任务、知识库上传与维护。 |
+| 任务进度 | 任务 ID、状态查询、SSE、取消、重新执行及刷新后重新连接已有任务。 |
 
-资源中心按类别组织资源包。针对深度优先搜索（DFS），项目还提供图结构、访问顺序与递归栈同步演示；它在讲义中作为主图解，在其他资源中作为辅助理解内容。旧数据中的动画脚本类型仅用于历史兼容，不属于当前六类可选资源。
+DFS 的交互图解可展示图结构、访问顺序与递归栈。代码实验是内容和练习引导，当前没有隔离的在线代码执行沙箱。旧 `animation_script` 类型保留历史兼容，不在六类可选资源中。
 
-## AI 学习任务链路
+AI 模块按规划、检索、生成、辅导、评估和安全审核分工，通过 Pydantic 结构传递结果。各角色由编排代码调用，不代表多个自主系统独立讨论。检索实际入口是课程/知识点过滤与向量适配器；BM25 和自适应 MMR 的独立代码尚未接入该入口，详见 [当前检索链路](docs/learner-adaptive-rag.md)。
 
-~~~
-学习输入 / 测验记录
-      ↓
-动态画像（目标、基础、偏好、时间预算、版本）
-      ↓
-课程知识检索与证据充分性判断
-      ↓
-结构化 Agent 协作：规划 → 生成 / 辅导 / 评估 → SafetyAgent 审核
-      ↓
-资源、学习路径、反馈与证据来源
-      ↓
-下一轮画像与路径更新
-~~~
+## 架构与代码入口
 
-智能体按职责传递结构化数据，不依赖一个提示词模拟所有角色。检索侧组合结构化切分、向量和 BM25 召回、融合排序及去冗；生成侧保留证据分级与审核边界。证据不足时不补写事实，审核未通过时不将结果当作成功内容入库。没有测验记录时，系统不推断掌握度。
+```text
+Vue 3 / TypeScript
+       │ /api/*
+       ▼
+Spring Boot 业务服务 ── MySQL（本地演示可用 H2）
+       │ 内部 AI 请求、任务状态
+       ▼
+FastAPI / Pydantic ── 课程语料、local 或 Chroma 向量适配器
+       └───────────── 可配置的模型接口
+```
 
-项目支持 OpenAI 兼容接口形式的模型服务。模型名称、接口地址和密钥由环境变量指定；开发环境未配置密钥时可运行演示链路，但这不等同于真实模型调用。
+前端统一调用 Java API。Java 保存用户、课程、资源、作答和任务快照；Python 实现 AI 流水线、检索和输出校验。任务执行使用进程内线程池，重启时不会从生成步骤断点继续。Redis 未接入业务缓存或任务执行；生产模板中保留的 Redis 配置不代表缓存能力。边界及成本见 [系统架构](docs/architecture.md)。
 
-## 技术架构
+| 路径 | 内容 |
+| --- | --- |
+| `frontend/` | Vue 页面、资源渲染、任务交互和 TypeScript 类型 |
+| `backend-api/` | Spring Boot API、Flyway 迁移、业务测试 |
+| `ai-agent-service/` | FastAPI、Agent、检索、生成流水线、测试和公开语料 |
+| `api-contract.md` | 前端 API 与内部 AI 接口约定 |
+| `scripts/`、`deploy/` | 启动、验证、部署辅助文件 |
+| `docs/` | 当前说明及历史阶段报告；历史报告不等于当前版本验证 |
 
-| 层次 | 技术 | 职责 |
-| --- | --- | --- |
-| 前端 | Vue 3、TypeScript、Vite、Pinia | 学生与教师页面、资源渲染、任务进度、交互体验 |
-| 业务 API | Java 17、Spring Boot 3、Maven、Flyway | 认证授权、用户状态、班级、资源、路径、测验、任务记录 |
-| AI 服务 | Python 3.11+、FastAPI、Pydantic | RAG、多智能体编排、结构化生成、安全审查 |
-| 数据层 | MySQL、Redis、Chroma | 业务持久化、任务/缓存、向量检索 |
-| 部署 | Docker Compose、容器化服务 | 本地联调与生产环境配置 |
+## 本地运行
 
-~~~
-浏览器（学生端 / 教师端）
-          │ /api/*
-          ▼
-Spring Boot 业务 API ───── MySQL / Redis
-          │ AI 任务与状态
-          ▼
-FastAPI 智能体服务 ───── Chroma / 课程语料 / 模型接口
-~~~
+### Docker Compose
 
-业务 API 是前端的统一入口；AI 任务通过任务 ID 查询状态，前端可接收 SSE 事件并处理取消、重试及陈旧任务恢复。接口和状态约定参见 [API 契约](api-contract.md)。
+需要 Docker Engine 与 Compose 插件。默认开发组合使用 `.env.example`，端口仅绑定本机；需允许下载镜像和安装依赖，首次启动不保证瞬间就绪。
 
-## 代码结构
-
-~~~
-.
-├── frontend/                  Vue 3 学生端与教师端
-├── backend-api/               Spring Boot 业务 API 与数据库迁移
-├── ai-agent-service/          FastAPI、Agent、RAG 与课程语料种子
-├── deploy/                    部署辅助配置
-├── docs/                      架构、检索、评估和部署技术文档
-├── scripts/                   本地启动、验证与运维辅助脚本
-├── docker-compose.yml         本地开发环境
-├── docker-compose.prod.yml    生产部署配置
-├── .env.example               本地开发环境变量示例
-└── .env.production.example    生产环境变量模板
-~~~
-
-课程语料种子的来源和许可证记录见 [开放知识库说明](docs/open-source-knowledge-base.md)。仓库没有附带未授权的完整教材、教师私有课件或个人学习数据。
-
-## 本地启动
-
-建议准备 Docker Engine 与 Docker Compose 插件，并确保 5173、8080、8000、8001、3306 和 6379 端口可用。
-
-~~~bash
+```bash
 git clone https://github.com/Richard-Lee0419/-EduPath.git
 cd ./-EduPath
 docker compose up --build
-~~~
-
-首次启动需下载镜像并安装前后端依赖，耗时取决于网络和本机环境。服务就绪后：
+```
 
 | 地址 | 用途 |
 | --- | --- |
-| http://localhost:5173 | Web 应用 |
+| http://localhost:5173 | Web 应用，登录 `demo / 123456` |
 | http://localhost:8080/actuator/health | 业务服务健康检查 |
 | http://localhost:8000/health | AI 服务健康检查 |
+| http://localhost:8000/runtime | AI 运行模式，检查是否配置真实模型 |
 
-本地开发组合使用仓库中的 [环境变量示例](.env.example)，其中的口令仅用于开发。页面提供一键进入测试账号；对应种子账号为 demo / 123456。公开部署前必须关闭或重新设计演示账号入口，并替换数据库、JWT、存储及其他凭据。
+开发口令只用于演示；教师账号为 `teacher / 123456`。线上实例的账号可用性以实际响应为准。停止本地服务使用 `docker compose down`；不加 `-v` 时保留数据库卷。
 
-若需真实模型能力，请按实际服务填写模型接口、模型名和密钥，并确认所选模型支持当前结构化输出契约。不要把含密钥的环境文件提交到 Git。
+### 不使用 Docker
 
-## 生产部署
+需要 Node.js 24、JDK 17、Maven 3.9+、Python 3.11+。在三个终端中分别执行：
 
-项目已有云服务器部署实例，访问地址见文首。自行部署时，生产配置和开发配置应分离：先参考 [.env.production.example](.env.production.example) 创建本地未跟踪的 .env.production，逐项填写数据库、JWT、对象存储、模型及嵌入服务配置；部署前运行 [部署检查](docs/production-deployment.md)中列出的校验，再按文档启动 docker-compose.prod.yml。
+```bash
+# 终端 1：确定性 AI 开发模式，无需模型密钥
+cd ai-agent-service
+python -m venv .venv
+# 激活虚拟环境：Windows .venv\Scripts\Activate.ps1；macOS/Linux source .venv/bin/activate
+python -m pip install -e ".[dev]"
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 
-生产环境应只暴露必要的 Web 入口，让数据库、Redis、向量服务和内部 API 留在受控网络；同时配置 HTTPS、备份、监控、密钥轮换和上传文件权限。仓库公开部署配置，但不包含线上环境的凭据、数据库或生产数据。
+# 终端 2：H2 内存数据库；重启会重建演示数据
+cd backend-api
+mvn spring-boot:run -Dspring-boot.run.profiles=test
 
-## 开发与验证
+# 终端 3
+cd frontend
+npm ci
+npm run dev -- --host 127.0.0.1
+```
 
-各服务可独立验证。以下命令应在对应目录执行：
+直接运行前请确认当前 shell 没有残留生产环境变量。确定性模式需清空 `LLM_PROVIDER`、`LLM_BASE_URL`、`LLM_MODEL`、`LLM_API_KEY`，并使用 `EDUPATH_ENV=dev`、`VECTOR_STORE_PROVIDER=local`、`EMBEDDING_PROVIDER=local`。`.env.example` 并不会被手工启动的 Python 自动读取；Windows 运行脚本可显式传入未跟踪的环境文件。
 
-~~~bash
-# frontend/
-npm install
+确定性模式验证业务接口与状态流转，不证明真实模型生成质量。配置模型时可参考 [模型变量示例](ai-agent-service/.env.real-model.example)，并通过 `generation_mode`、`model_runtime` 检查结果来源。远程模型错误可能导致任务失败；路径生成/重规划允许规则路径回退，辅导允许证据摘录回退，均明确标记，不能将其称为真实模型结果。
+
+## 验证与限制
+
+```bash
+# frontend/：Node 24 用于现有直接导入 .ts 的测试脚本
+npm ci
+npm test
 npm run type-check
 npm run build
-npm run test:resources
-npm run test:research
-npm run test:real-api
 
 # backend-api/
 mvn test
 
-# ai-agent-service/（建议先创建虚拟环境）
-python -m pip install -e ".[dev,vector]"
+# ai-agent-service/，先安装 .[dev]
 python -m pytest
-~~~
+```
 
-这些命令分别覆盖类型与构建、前端资源/任务契约、Java 服务测试和 AI 服务测试。测试范围、环境依赖与真实用户效果是不同概念；自动化测试通过不等于证明个性化学习成效。
+前端资源解析与事件测试验证结果断言；`test:static-contract` 检查源码约定，旧 `test:real-api` 仅是兼容别名，**不发起 HTTP 请求**。Java 测试使用 H2 和模拟 AI，Python 测试包含确定性流程与模拟模型响应，不能替代真实模型或浏览器验证。跨服务流程、环境与本次结果见 [验证记录](docs/validation-report.md)。本项目尚未配置 ESLint，不能把类型检查称为 lint 通过。
 
-## 当前范围与扩展方向
+[CI 配置](.github/workflows/ci.yml) 执行前端测试/构建、Java/Python 测试、真实 HTTP 与 Chromium 学习闭环、知识库生命周期，并在独立任务中启动开发 Compose 验证 MySQL/Chroma。[修复后的远程检查](https://github.com/Richard-Lee0419/-EduPath/actions/runs/38068948500) 三组全部通过，包括真实 Chroma 的干扰片段回归；此前的检索失败、提交及结果范围见 [验证记录](docs/validation-report.md)。已启动隔离本地服务时，可执行 `python scripts/smoke_learning_flow.py --output output/validation/learning-flow.json`，知识库检查使用 `python scripts/smoke_knowledge_lifecycle.py --confirm-isolated-local`。这些命令创建合成账号或资料，只允许本地 HTTP 地址，勿连接生产数据库。
 
-- 当前主要应用与验证课程是《数据结构与算法》和《计算机组成原理》。课程结构可复用，但接入新课程仍需要合法语料、知识点整理、入库检查与实际验证。
-- 代码实验资源提供学习步骤、示例与练习引导；目前不应把它理解为隔离的在线代码执行沙箱。
-- 个性化推荐与掌握度是辅助学习决策的信号，不能替代教师判断或正式教育测评。
-- 教师上传资料、学生数据和模型输出需遵守实际使用场景下的隐私、版权与权限要求。
+浏览器验证与重新录制见 [演示说明](docs/demo-guide.md)，执行 `npm run test:e2e` 或 `npm run test:e2e:record`。本地已通过两项无接口 mock 的浏览器测试；视频覆盖学生流程，教师拒绝上传由另一项测试验证。
 
-更多设计细节见 [系统架构](docs/architecture.md)、[检索切分设计](docs/rag-semantic-chunking-design.md)、[学习者自适应检索](docs/learner-adaptive-rag.md)与[评估驱动干预](docs/assessment-driven-intervention.md)。
+本次收尾与合并记录见 [PR #1](https://github.com/Richard-Lee0419/-EduPath/pull/1)。README 的成果对应此版本；本轮没有部署线上实例，原在线实例不自动代表它。优化前的完整介绍及当时的技术文档入口保留在 [旧版介绍存档](docs/history/README-before-portfolio-review.md)，提交历史继续保留。
+
+已知边界：
+
+- 尚未完成正式学习效果实验；画像响应、路径变化与测试通过不等于教学效果已成立。
+- 本地哈希 embedding 便于重复验证，不代表语义检索模型质量；部署采用真实 embedding 时需另行评测。
+- 取消是尽力中止任务并阻止结果继续发布，不能保证远程模型请求停止计费；重试从头创建新任务。
+- AI 内部任务状态存在内存中，Java 保存任务快照；进程重启会将陈旧运行任务标记失败，不支持断点续跑。
+- 新课程需要合法语料、知识点映射、检索评测和人工内容复核；当前没有证明跨课程泛化能力。
+
+## 数据与部署
+
+公开语料及其来源、许可证记录见 [开放知识库说明](docs/open-source-knowledge-base.md) 和 [seed corpus](ai-agent-service/data/seed_corpus/README.md)。公开版本不附教师私有课件、生产数据或密钥；缺失原始资料的历史评测不能作为当前可复现结果。
+
+生产部署参考 [.env.production.example](.env.production.example) 和 [部署说明](docs/production-deployment.md)。生产需单独配置数据库、JWT、对象存储、真实模型及 embedding，并关闭或重新设计共享演示账号。对共享公开演示不要上传真实个人信息或未经授权的课程资料。
 
 ## License
 
-项目代码采用 [Apache License 2.0](LICENSE)。外部课程语料与第三方依赖可能适用各自许可证，使用前请核对对应来源和授权范围。
+代码采用 [Apache License 2.0](LICENSE)。第三方课程资料与依赖适用各自许可证，请按来源清单核对授权范围。

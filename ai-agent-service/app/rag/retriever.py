@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.core.config import settings
-from app.rag.chunker import Chunker
+from app.rag.chunker import Chunker, RagChunk
 from app.rag.chroma_vector_store import ChromaVectorStore
 from app.rag.document_loader import DocumentLoader, SourceDocument
 from app.rag.vector_store import SearchHit, VectorStore
@@ -76,6 +76,35 @@ class Retriever:
         content: str,
         source: str,
     ) -> list[RagEvidence]:
+        """Index already-approved input; the upload API reviews prepared chunks first."""
+
+        chunks = self.prepare_uploaded_document(
+            document_id=document_id,
+            course_id=course_id,
+            course_code=course_code,
+            knowledge_point_id=knowledge_point_id,
+            knowledge_point=knowledge_point,
+            title=title,
+            content=content,
+            source=source,
+        )
+        self.replace_uploaded_document_chunks(course_id=course_id, document_id=document_id, chunks=chunks)
+        return self.uploaded_document_evidence(chunks)
+
+    def prepare_uploaded_document(
+        self,
+        *,
+        document_id: int,
+        course_id: int,
+        course_code: str,
+        knowledge_point_id: int,
+        knowledge_point: str,
+        title: str,
+        content: str,
+        source: str,
+    ) -> list[RagChunk]:
+        """Parse/chunk without touching the vector store."""
+
         document = SourceDocument(
             course_id=course_id,
             course_code=course_code,
@@ -85,8 +114,15 @@ class Retriever:
             content=content,
             source=source,
         )
-        chunks = self.chunker.chunk_uploaded_document(document, document_id)
-        self.vector_store.upsert_chunks(chunks)
+        return self.chunker.chunk_uploaded_document(document, document_id)
+
+    def replace_uploaded_document_chunks(self, *, course_id: int, document_id: int, chunks: list[RagChunk]) -> int:
+        return self.vector_store.replace_document_chunks(course_id, document_id, chunks)
+
+    def delete_uploaded_document(self, *, course_id: int, document_id: int) -> int:
+        return self.vector_store.delete_document_chunks(course_id, document_id)
+
+    def uploaded_document_evidence(self, chunks: list[RagChunk]) -> list[RagEvidence]:
         return [
             RagEvidence(
                 chunk_id=chunk.chunk_id,

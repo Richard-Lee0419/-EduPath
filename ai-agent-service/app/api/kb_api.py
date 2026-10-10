@@ -63,6 +63,14 @@ class KnowledgeIngestResponse(BaseModel):
     index_status: str
     chunks: list[KnowledgeSearchResult]
     safety: dict[str, object]
+    safety_status: str
+    index_error: str = ""
+
+
+class KnowledgeVectorDeleteResponse(BaseModel):
+    document_id: int
+    course_id: int
+    deleted_chunks: int
 
 
 @router.post("/search", response_model=KnowledgeSearchResponse)
@@ -109,6 +117,17 @@ def ingest(request: KnowledgeIngestRequest) -> KnowledgeIngestResponse:
     if not text.strip():
         raise HTTPException(status_code=422, detail="文档未解析到有效文本，无法写入知识库索引")
     return KnowledgeIngestResponse(**orchestrator.ingest_knowledge_document(request, text))
+
+
+@router.delete("/documents/{document_id}/vectors", response_model=KnowledgeVectorDeleteResponse)
+def delete_document_vectors(document_id: int, course_id: int) -> KnowledgeVectorDeleteResponse:
+    """Internal Java-to-AI call; delete zero is an idempotent success."""
+
+    try:
+        deleted = orchestrator.delete_knowledge_document_vectors(course_id=course_id, document_id=document_id)
+    except Exception as exception:
+        raise HTTPException(status_code=503, detail="知识库向量撤回失败，请稍后重试") from exception
+    return KnowledgeVectorDeleteResponse(document_id=document_id, course_id=course_id, deleted_chunks=deleted)
 
 
 def _decode_document_text(content_base64: str, content_type: str | None, filename: str) -> str:

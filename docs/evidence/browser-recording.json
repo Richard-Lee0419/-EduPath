@@ -1,0 +1,28 @@
+{
+  "status": "passed",
+  "verified_at_utc": "2026-10-10T16:10:31.619Z",
+  "scope": "Chromium UI -> Vite proxy -> Java/H2 -> AI; no HTTP mocks",
+  "mode": "deterministic_fallback",
+  "paid_model_calls": 0,
+  "duration_seconds": 107,
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "assertions": [
+    "profile v1 persists",
+    "three requested resource types rendered",
+    "resource content and evidence open",
+    "path v1 persists",
+    "incomplete quiz is refused in UI",
+    "three wrong answers score 0",
+    "path v1 to v2 persists",
+    "profile v2 persists"
+  ],
+  "limitations": [
+    "synthetic account; no real student feedback",
+    "not real-model quality or production deployment verification"
+  ],
+  "duration_scope": "Playwright run duration, including setup; video length can differ",
+  "inspected_video_duration_seconds": 105.04
+}

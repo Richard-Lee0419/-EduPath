@@ -1,6 +1,6 @@
 # EduPath Production Deployment
 
-This document describes the production-ready shape of the monorepo. The public entrypoint is the front-end Nginx container. Browser traffic reaches Spring Boot through `/api/*`; the Python AI service is internal only.
+This document describes the production deployment template. The public entrypoint is the front-end Nginx container. Browser traffic reaches Spring Boot through `/api/*`; the Python AI service is internal only. The verified Docker CI uses the development Compose file; it does not establish that these production images, OSS settings or a cloud deployment work. See [validation scope](validation-report.md).
 
 ## Services
 
@@ -58,7 +58,7 @@ The incremental Dockerfile replaces the complete `/app/app` package, so removed 
 
 - Back-end must run with `SPRING_PROFILES_ACTIVE=prod`.
 - AI service must run with `EDUPATH_ENV=prod`.
-- Flyway migration versions that have reached a deployed database are immutable. The production lineage keeps `V6__demo_class_readiness.sql`; later migrations continue from V7 through V16. Never reuse or renumber an applied version, because production startup validates the recorded description and checksum before applying new migrations.
+- Flyway migration versions that have reached a deployed database are immutable. The production lineage keeps `V6__demo_class_readiness.sql`; current repository migrations continue through V18. Never reuse or renumber an applied version, because production startup validates the recorded description and checksum before applying new migrations.
 - Back-end production startup rejects missing DB credentials, weak/default JWT secrets, missing AI service URL, default storage signing secrets, and non-OSS object storage.
 - When registration email is enabled, back-end production startup also requires QQ SMTP sender credentials.
 - AI production startup requires real LLM settings, Chroma vector store, non-local embeddings, and `EMBEDDING_STRICT=true`.

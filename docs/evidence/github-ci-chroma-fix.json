@@ -1,0 +1,68 @@
+{
+  "run_id": 38068948500,
+  "run_url": "https://github.com/Richard-Lee0419/-EduPath/actions/runs/38068948500",
+  "head_sha": "2a3b43cced8bc931a45ff1514147af3efac68635",
+  "event": "pull_request",
+  "conclusion": "success",
+  "runner": "Ubuntu 24.04",
+  "jobs": [
+    {
+      "name": "frontend",
+      "conclusion": "success",
+      "startedAt": "2026-10-10T16:45:32Z",
+      "completedAt": "2026-10-10T16:45:56Z",
+      "url": "https://github.com/Richard-Lee0419/-EduPath/actions/runs/38068948500/job/114262244053"
+    },
+    {
+      "name": "docker-integration",
+      "conclusion": "success",
+      "startedAt": "2026-10-10T16:45:31Z",
+      "completedAt": "2026-10-10T16:47:25Z",
+      "url": "https://github.com/Richard-Lee0419/-EduPath/actions/runs/38068948500/job/114262244232"
+    },
+    {
+      "name": "backend-ai",
+      "conclusion": "success",
+      "startedAt": "2026-10-10T16:45:32Z",
+      "completedAt": "2026-10-10T16:47:23Z",
+      "url": "https://github.com/Richard-Lee0419/-EduPath/actions/runs/38068948500/job/114262244239"
+    }
+  ],
+  "java": {
+    "tests": 56,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "ai_tests_passed": 82,
+  "script_tests_passed": 1,
+  "frontend_behavior_tests_passed": 29,
+  "frontend_static_contract": "passed",
+  "browser": {
+    "expected": 2,
+    "unexpected": 0,
+    "flaky": 0,
+    "skipped": 0,
+    "duration": 17434.398
+  },
+  "docker": {
+    "mysql_version_observed": "8.4.11",
+    "flyway_migrations": 18,
+    "vector_provider_verified": "chroma",
+    "chroma_image": "chromadb/chroma:0.5.23",
+    "learning_flow": "passed",
+    "kb_lifecycle": "passed",
+    "crowded_course_filter": "passed"
+  },
+  "prior_failure": {
+    "run_id": 38068139705,
+    "head_sha": "cc4cff56ae0f85135d597ab2e2d1b24671c70794",
+    "reason": "KnowledgeAgent did not retrieve course evidence"
+  },
+  "limitations": [
+    "deterministic mode and local hash embeddings",
+    "synthetic functional regression; not semantic retrieval quality",
+    "no production deployment or OSS verification",
+    "not a model-quality or learning-effect evaluation"
+  ]
+}

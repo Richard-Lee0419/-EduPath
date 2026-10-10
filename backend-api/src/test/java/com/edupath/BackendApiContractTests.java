@@ -2,6 +2,7 @@ package com.edupath;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -19,6 +20,7 @@ import com.edupath.ai.AiAgentClient.KnowledgeIngestResult;
 import com.edupath.common.ExternalServiceException;
 import com.edupath.kb.KnowledgeBaseService.KnowledgeSearchRequest;
 import com.edupath.resource.ResourceTaskRequest;
+import com.edupath.resource.ResourceRepository;
 import com.edupath.storage.ObjectStorageService;
 import com.jayway.jsonpath.JsonPath;
 import java.nio.file.Files;
@@ -31,6 +33,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -69,12 +72,262 @@ class BackendApiContractTests {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private ResourceRepository resourceRepository;
+
     @BeforeEach
     void resetAiStub() {
         aiAgentClient.failResourceGeneration = false;
         aiAgentClient.simulateQualityRegression = false;
         aiAgentClient.lastIngestPayload = null;
         aiAgentClient.lastSearchRequest = null;
+        aiAgentClient.resourceOverride = null;
+        aiAgentClient.ingestOverride = null;
+        aiAgentClient.failIngest = false;
+        aiAgentClient.failVectorDelete = false;
+        aiAgentClient.lastDeletedDocument = null;
+    }
+
+    @AfterEach
+    void removeAuditResourceFixtures() {
+        jdbcTemplate.update("DELETE FROM resource_interactions WHERE resource_id LIKE 'audit_%'");
+        jdbcTemplate.update("DELETE FROM resources WHERE resource_id LIKE 'audit_%' OR source_task_id = 'quality-draft'");
+    }
+
+    @Test
+    void personalResourcesStayPrivateAcrossListDetailDownloadAndInteractions() throws Exception {
+        long demoId = jdbcTemplate.queryForObject("SELECT id FROM users WHERE username = 'demo'", Long.class);
+        String privateId = fixtureResource(demoId, "published", true);
+        String token = loginToken();
+        String otherToken = registerStudent("private_reader_" + System.nanoTime());
+
+        mockMvc.perform(get("/api/resources").param("keyword", privateId))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(0));
+        mockMvc.perform(get("/api/resources").param("keyword", privateId)
+                        .header("Authorization", bearer(otherToken)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(0));
+        mockMvc.perform(get("/api/resources").param("keyword", privateId)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(1));
+        mockMvc.perform(get("/api/resources/{id}", privateId)).andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/resources/{id}", privateId).header("Authorization", bearer(otherToken)))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/resources/{id}/download-url", privateId)
+                        .header("Authorization", bearer(otherToken)))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(post("/api/resources/{id}/interactions", privateId)
+                        .header("Authorization", bearer(otherToken)).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"complete\"}"))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/resources/{id}", privateId).header("Authorization", bearer(token)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.content").value("fixture content"));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM resource_interactions WHERE resource_id = ?", Long.class, privateId)).isZero();
+    }
+
+    @Test
+    void globalPublishedResourcesSupportAuthenticatedStudentInteractionsAndHideOtherStatuses() throws Exception {
+        String globalId = fixtureResource(null, "published", true);
+        String draftId = fixtureResource(null, "draft", false);
+        String deletedId = fixtureResource(null, "deleted", true);
+        mockMvc.perform(get("/api/resources/{id}", globalId)).andExpect(status().isOk());
+        mockMvc.perform(get("/api/resources/{id}", draftId)).andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/resources/{id}", deletedId).header("Authorization", bearer(loginToken("admin"))))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(post("/api/resources/{id}/interactions", globalId)
+                        .header("Authorization", bearer(loginToken())).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"view\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.interaction_count").value(1));
+    }
+
+    @Test
+    void rejectedMissingAndContradictorySafetyNeverPersistGeneratedRows() throws Exception {
+        AiResourceGenerateResult safe = aiResourceResult();
+        String token = loginToken();
+        long before = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM resources", Long.class);
+        List<AiResourceGenerateResult> rejected = List.of(
+                new AiResourceGenerateResult("unsafe", "success", safe.plannedAgents(), "review_required",
+                        safe.resources(), safe.evidence(), new AiSafety(false, "high", List.of("unsafe"), List.of(), 0.9)),
+                new AiResourceGenerateResult("missing", "success", safe.plannedAgents(), "passed",
+                        safe.resources(), safe.evidence(), null),
+                new AiResourceGenerateResult("conflict", "success", safe.plannedAgents(), "review_required",
+                        safe.resources(), safe.evidence(), safe.safety()),
+                new AiResourceGenerateResult("missing-status", "success", safe.plannedAgents(), null,
+                        safe.resources(), safe.evidence(), safe.safety()));
+        for (AiResourceGenerateResult result : rejected) {
+            aiAgentClient.resourceOverride = result;
+            MvcResult created = mockMvc.perform(post("/api/agent/resource-task")
+                            .header("Authorization", bearer(token)).contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"course_id\":1,\"knowledge_point_ids\":[131],\"resource_types\":[\"lecture\"]}"))
+                    .andExpect(status().isOk()).andReturn();
+            String taskId = JsonPath.read(created.getResponse().getContentAsString(), "$.data.task_id");
+            String terminal = waitForTaskTerminal(taskId, token);
+            assertThat(JsonPath.<String>read(terminal, "$.data.status")).isEqualTo("failed");
+            assertThat(JsonPath.<String>read(terminal, "$.data.error_message")).contains("SafetyAgent");
+            assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM resources", Long.class)).isEqualTo(before);
+        }
+    }
+
+    @Test
+    void rejectedKnowledgeUploadRetainsFailureRecordAndNoChunks() throws Exception {
+        aiAgentClient.ingestOverride = new KnowledgeIngestResult("rejected-kb", "parsed", "indexed",
+                List.of(new KnowledgeChunk("unsafe-kb", "unsafe", "unsafe", 1, "fixture")),
+                new AiSafety(false, "high", List.of("unsafe"), List.of(), 0.9), "review_required", "unsafe");
+        MvcResult uploaded = uploadFixture(loginToken("teacher"));
+        String json = uploaded.getResponse().getContentAsString();
+        long documentId = JsonPath.<Number>read(json, "$.data.document_id").longValue();
+        assertThat(JsonPath.<String>read(json, "$.data.index_status")).isEqualTo("failed");
+        assertThat(JsonPath.<String>read(json, "$.data.index_error")).contains("SafetyAgent", "unsafe");
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM knowledge_document_chunks WHERE document_id = ?",
+                Long.class, documentId)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM knowledge_index_jobs WHERE document_id = ?",
+                String.class, documentId)).isEqualTo("rejected");
+    }
+
+    @Test
+    void failedKnowledgeUploadCommitsDocumentAndFinishedFailureAttempt() throws Exception {
+        aiAgentClient.failIngest = true;
+        long before = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM knowledge_documents", Long.class);
+        mockMvc.perform(multipart("/api/kb/upload")
+                        .file(new MockMultipartFile("file", "failed-upload.md", "text/markdown", "content".getBytes()))
+                        .param("courseId", "1").header("Authorization", bearer(loginToken("teacher"))))
+                .andExpect(status().isBadGateway());
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM knowledge_documents", Long.class)).isEqualTo(before + 1);
+        assertThat(jdbcTemplate.queryForObject("SELECT index_status FROM knowledge_documents WHERE filename = 'failed-upload.md'",
+                String.class)).isEqualTo("failed");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM knowledge_index_jobs j JOIN knowledge_documents d ON d.document_id = j.document_id
+                WHERE d.filename = 'failed-upload.md' AND j.status = 'failed' AND j.finished_at IS NOT NULL
+                """, Long.class)).isEqualTo(1);
+    }
+
+    @Test
+    void rejectedKnowledgeReindexFailsTaskAndClearsBackendChunks() throws Exception {
+        String token = loginToken("teacher");
+        long documentId = JsonPath.<Number>read(uploadFixture(token).getResponse().getContentAsString(), "$.data.document_id").longValue();
+        aiAgentClient.ingestOverride = new KnowledgeIngestResult("reject-reindex", "parsed", "failed", List.of(),
+                new AiSafety(false, "high", List.of("unsafe"), List.of(), 0.9), "review_required", "unsafe");
+        MvcResult reindex = mockMvc.perform(post("/api/kb/documents/{id}/reindex", documentId)
+                        .header("Authorization", bearer(token))).andExpect(status().isOk()).andReturn();
+        String taskId = JsonPath.read(reindex.getResponse().getContentAsString(), "$.data.task_id");
+        assertThat(JsonPath.<String>read(waitForTaskTerminal(taskId, token), "$.data.status")).isEqualTo("failed");
+        assertThat(jdbcTemplate.queryForObject("SELECT index_status FROM knowledge_documents WHERE document_id = ?",
+                String.class, documentId)).isEqualTo("failed");
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM knowledge_document_chunks WHERE document_id = ?",
+                Long.class, documentId)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM knowledge_index_jobs WHERE document_id = ? AND status = 'rejected'",
+                Long.class, documentId)).isEqualTo(1);
+    }
+
+    @Test
+    void vectorWithdrawalFailureLeavesDocumentAndChunksForRetry() throws Exception {
+        String token = loginToken("teacher");
+        long documentId = JsonPath.<Number>read(uploadFixture(token).getResponse().getContentAsString(), "$.data.document_id").longValue();
+        aiAgentClient.failVectorDelete = true;
+        mockMvc.perform(delete("/api/kb/documents/{id}", documentId).header("Authorization", bearer(token)))
+                .andExpect(status().isBadGateway());
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM knowledge_documents WHERE document_id = ? AND deleted_at IS NULL",
+                Long.class, documentId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM knowledge_document_chunks WHERE document_id = ?",
+                Long.class, documentId)).isEqualTo(1);
+        aiAgentClient.failVectorDelete = false;
+        mockMvc.perform(delete("/api/kb/documents/{id}", documentId).header("Authorization", bearer(token)))
+                .andExpect(status().isOk());
+        assertThat(aiAgentClient.lastDeletedDocument).isEqualTo(documentId);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM knowledge_documents WHERE document_id = ? AND deleted_at IS NULL",
+                Long.class, documentId)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM knowledge_document_chunks WHERE document_id = ?",
+                Long.class, documentId)).isZero();
+    }
+
+    @Test
+    void unrelatedTeacherCannotReadPersonalResourcesOrMutateCourseDocuments() throws Exception {
+        String username = "unscoped_teacher_" + System.nanoTime();
+        registerStudent(username);
+        jdbcTemplate.update("UPDATE users SET role = 'teacher' WHERE username = ?", username);
+        String token = loginToken(username);
+        long demoId = jdbcTemplate.queryForObject("SELECT id FROM users WHERE username = 'demo'", Long.class);
+        String privateId = fixtureResource(demoId, "published", true);
+        mockMvc.perform(get("/api/resources/{id}", privateId).header("Authorization", bearer(token)))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/resources").param("keyword", privateId).header("Authorization", bearer(token)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.total").value(0));
+        mockMvc.perform(get("/api/resources/quality-metrics")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/resources/quality-metrics").header("Authorization", bearer(token)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.summary.total_resources").value(0));
+        long documentId = JsonPath.<Number>read(uploadFixture(loginToken("teacher")).getResponse().getContentAsString(),
+                "$.data.document_id").longValue();
+        mockMvc.perform(post("/api/kb/documents/{id}/reindex", documentId).header("Authorization", bearer(token)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/kb/documents/{id}", documentId).header("Authorization", bearer(token)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(patch("/api/kb/documents/{id}/status", documentId).header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"parse_status\":\"parsed\",\"index_status\":\"indexed\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void safetyApprovedQualityRejectedResourcesRemainDraftForRepair() throws Exception {
+        AiResourceGenerateResult safe = aiResourceResult();
+        AiGeneratedResource generated = safe.resources().get(0);
+        aiAgentClient.resourceOverride = new AiResourceGenerateResult("quality-draft", "success", safe.plannedAgents(),
+                "passed", List.of(new AiGeneratedResource(generated.title(), generated.resourceType(), generated.contentFormat(),
+                generated.content(), generated.summary(), generated.difficulty(), generated.knowledgePoints(),
+                generated.personalizedReason(), generated.estimatedMinutes(), generated.profileFingerprint(),
+                Map.of("gate_passed", false, "total_score", 40))), safe.evidence(), safe.safety());
+        String token = loginToken();
+        MvcResult created = mockMvc.perform(post("/api/agent/resource-task")
+                        .header("Authorization", bearer(token)).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"course_id\":1,\"knowledge_point_ids\":[131],\"resource_types\":[\"lecture\"]}"))
+                .andExpect(status().isOk()).andReturn();
+        String taskId = JsonPath.read(created.getResponse().getContentAsString(), "$.data.task_id");
+        String terminal = waitForTaskTerminal(taskId, token);
+        assertThat(JsonPath.<String>read(terminal, "$.data.status")).isEqualTo("success");
+        String resourceId = JsonPath.read(terminal, "$.data.result.resources[0].resource_id");
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM resources WHERE resource_id = ?", String.class, resourceId))
+                .isEqualTo("draft");
+        mockMvc.perform(get("/api/resources/{id}", resourceId).header("Authorization", bearer(token)))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(patch("/api/resources/{id}/status", resourceId).header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"published\"}"))
+                .andExpect(status().isConflict());
+    }
+
+    private String fixtureResource(Long owner, String resourceStatus, boolean safetyPassed) {
+        String id = "audit_" + java.util.UUID.randomUUID();
+        resourceRepository.insert(new ResourceRepository.ResourceCreate(id, id, "lecture", 1, List.of("二叉树递归遍历"),
+                "basic", "fixture", resourceStatus, "markdown", "fixture content", List.of(),
+                Map.of("passed", safetyPassed), null, null, "fixture", List.of(), owner,
+                null, "fixture", 10, "fixture", Map.of(), "deterministic_fallback"));
+        return id;
+    }
+
+    private MvcResult uploadFixture(String token) throws Exception {
+        return mockMvc.perform(multipart("/api/kb/upload")
+                        .file(new MockMultipartFile("file", "audit-" + java.util.UUID.randomUUID() + ".md",
+                                "text/markdown", "fixture content".getBytes()))
+                        .param("courseId", "1").header("Authorization", bearer(token)))
+                .andExpect(status().isOk()).andReturn();
+    }
+
+    private String registerStudent(String username) throws Exception {
+        MvcResult registered = mockMvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + username + "@example.com\",\"password\":\"123456\"}"))
+                .andExpect(status().isOk()).andReturn();
+        return JsonPath.read(registered.getResponse().getContentAsString(), "$.data.token");
+    }
+
+    private String waitForTaskTerminal(String taskId, String token) throws Exception {
+        for (int i = 0; i < 100; i++) {
+            String json = mockMvc.perform(get("/api/agent/tasks/{id}", taskId).header("Authorization", bearer(token)))
+                    .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+            String taskStatus = JsonPath.read(json, "$.data.status");
+            if (List.of("success", "failed", "cancelled").contains(taskStatus)) {
+                return json;
+            }
+            Thread.sleep(20);
+        }
+        throw new AssertionError("Task did not finish: " + taskId);
     }
 
     @Test
@@ -480,9 +733,15 @@ class BackendApiContractTests {
                 .andExpect(jsonPath("$.data.overall_score").value(0))
                 .andExpect(jsonPath("$.data.mastery").isEmpty());
 
-        mockMvc.perform(get("/api/resources").header("Authorization", bearer(token)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.items").isEmpty());
+        MvcResult resources = mockMvc.perform(get("/api/resources").header("Authorization", bearer(token)))
+                .andExpect(status().isOk()).andReturn();
+        List<String> visibleIds = JsonPath.read(resources.getResponse().getContentAsString(), "$.data.items[*].resource_id");
+        for (String resourceId : visibleIds) {
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM resources WHERE resource_id = ?
+                    AND status = 'published' AND (owner_user_id IS NULL OR owner_user_id <= 0)
+                    """, Long.class, resourceId)).isEqualTo(1);
+        }
     }
 
     @Test
@@ -1440,6 +1699,11 @@ class BackendApiContractTests {
         private boolean simulateQualityRegression;
         private KnowledgeDocumentPayload lastIngestPayload;
         private KnowledgeSearchRequest lastSearchRequest;
+        private AiResourceGenerateResult resourceOverride;
+        private KnowledgeIngestResult ingestOverride;
+        private boolean failIngest;
+        private boolean failVectorDelete;
+        private Long lastDeletedDocument;
 
         StubAiAgentClient() {
             super("http://127.0.0.1:9");
@@ -1450,6 +1714,9 @@ class BackendApiContractTests {
                 ResourceTaskRequest request, List<String> plannedAgents, Map<String, Object> studentProfile) {
             if (failResourceGeneration) {
                 throw new ExternalServiceException("AI 服务", "/resource/generate 不可用");
+            }
+            if (resourceOverride != null) {
+                return resourceOverride;
             }
             return aiResourceResult();
         }
@@ -1466,6 +1733,12 @@ class BackendApiContractTests {
         @Override
         public KnowledgeIngestResult ingestKnowledgeDocument(KnowledgeDocumentPayload payload) {
             lastIngestPayload = payload;
+            if (failIngest) {
+                throw new ExternalServiceException("AI 服务", "ingest fixture failure");
+            }
+            if (ingestOverride != null) {
+                return ingestOverride;
+            }
             return new KnowledgeIngestResult(
                     "ai_kb_ingest_001",
                     "parsed",
@@ -1477,6 +1750,15 @@ class BackendApiContractTests {
                             1.0,
                             payload.objectKey())),
                     new AiSafety(true, "low", List.of(), List.of("已完成 SafetyAgent 审查"), 0.94));
+        }
+
+        @Override
+        public KnowledgeVectorDeleteResult deleteKnowledgeDocumentVectors(long documentId, long courseId) {
+            if (failVectorDelete) {
+                throw new ExternalServiceException("AI 服务", "vector delete fixture failure");
+            }
+            lastDeletedDocument = documentId;
+            return new KnowledgeVectorDeleteResult(documentId, courseId, 0);
         }
 
         @Override

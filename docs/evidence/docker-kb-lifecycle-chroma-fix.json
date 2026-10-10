@@ -1,0 +1,43 @@
+{
+  "status": "passed",
+  "verified_at_utc": "2026-10-10T16:47:08.858733+00:00",
+  "scope": "real Java-to-AI HTTP; isolated local database required, chroma vectors verified",
+  "vector_provider": "chroma",
+  "limitations": [
+    "database backend not independently identified by this script; no cloud deployment verification",
+    "not a retrieval-quality evaluation",
+    "not browser verification",
+    "reindex uses unchanged content; shorter-version replacement is covered by AI regressions"
+  ],
+  "duration_seconds": 2.056,
+  "stages": [
+    {
+      "stage": "safe_upload_search",
+      "status": "passed",
+      "retrieved_chunks": 1
+    },
+    {
+      "stage": "reindex_idempotency_and_isolation",
+      "status": "success",
+      "chunks_before": 1,
+      "chunks_after": 1
+    },
+    {
+      "stage": "safety_refusal_not_retrievable",
+      "status": "passed",
+      "retrieved_chunks": 0
+    },
+    {
+      "stage": "java_delete_vector_isolation",
+      "status": "passed",
+      "retained_chunks": 1
+    },
+    {
+      "stage": "fixture_cleanup",
+      "status": "passed",
+      "documents_removed": 3
+    }
+  ],
+  "model_calls": 0,
+  "fixtures": "three self-authored synthetic documents; removed after verification"
+}
