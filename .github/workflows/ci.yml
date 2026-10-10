@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -34,7 +34,7 @@ jobs:
           docker compose config --quiet
 
   backend-ai:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       EDUPATH_ENV: dev
@@ -81,7 +81,7 @@ jobs:
         run: bash scripts/ci-learning-flow.sh
       - name: Attach reports and local flow evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-ai-validation
           path: |
@@ -91,7 +91,7 @@ jobs:
             frontend/playwright-report/
 
   docker-integration:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -102,7 +102,7 @@ jobs:
         run: bash scripts/ci-docker-flow.sh
       - name: Attach container logs and flow evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: docker-integration-validation
           path: output/validation/

@@ -7,7 +7,7 @@
 - 自动化结果：[验证记录](validation-report.md)。
 - [已录制核心学习流程](evidence/core-learning-flow.webm)：2026-10-11，本地公开版本、Chromium 1440×1000、合成学生账号。影片实际覆盖画像、三类资源及正文/证据、路径、小测、评分与版本更新；没有剪辑或加速等待。
 - 模式为 `deterministic_fallback`，local hash embedding / local vectors，付费模型调用 0。视频不是原在线实例，也不是本次真实模型验证录像。
-- 代码基线 `b0007c063126cdca8e2ef4b970386592d925bc53` 加本次尚未提交的优化；录制脚本及断言在仓库中，提交后应以包含视频的提交核对版本。
+- 录像与被验证实现提交于 [`a0dea72`](https://github.com/Richard-Lee0419/-EduPath/commit/a0dea7288af58728146ef95a708957816ddad722)，包含本地录制脚本及断言；[草稿 PR #1](https://github.com/Richard-Lee0419/-EduPath/pull/1) 后续补充远程验证证据。录像来自提交前同一工作区，没有用线上旧实例替代。
 
 ## 自动复现与录制
 

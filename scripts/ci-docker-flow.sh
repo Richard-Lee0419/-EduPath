@@ -29,6 +29,6 @@ if [ "$ready" != true ]; then
   echo "Container API/frontend failed to become healthy." >&2
   exit 1
 fi
-python scripts/smoke_learning_flow.py --timeout 120 --output output/validation/docker-learning-flow.json
+python scripts/smoke_learning_flow.py --vector-provider chroma --timeout 120 --output output/validation/docker-learning-flow.json
 python scripts/smoke_knowledge_lifecycle.py --confirm-isolated-local --vector-provider chroma \
   --timeout 120 --output output/validation/docker-kb-lifecycle.json

@@ -47,6 +47,7 @@ def main() -> int:
     parser.add_argument("--backend-url", type=local_url, default="http://127.0.0.1:8080")
     parser.add_argument("--ai-url", type=local_url, default="http://127.0.0.1:8000")
     parser.add_argument("--timeout", type=float, default=90)
+    parser.add_argument("--vector-provider", choices=("local", "chroma"), default="local")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     require(args.timeout > 0, "timeout must be positive")
@@ -54,6 +55,8 @@ def main() -> int:
     runtime = request_json("GET", f"{args.ai_url}/runtime")
     require(not (runtime.get("llm") or {}).get("configured"), "clear LLM configuration before this smoke run")
     require(not (runtime.get("llm") or {}).get("provider"), "clear LLM_PROVIDER before this smoke run")
+    require((runtime.get("vector_store") or {}).get("provider") == args.vector_provider,
+            "vector provider differs from the explicitly requested provider")
     stages: list[dict] = []
     token = ""
 
@@ -156,8 +159,9 @@ def main() -> int:
     record = {
         "status": "passed", "verified_at_utc": datetime.now(timezone.utc).isoformat(),
         "scope": "real Java-to-AI HTTP, deterministic fallback; isolated local database required",
+        "vector_provider": args.vector_provider,
         "limitations": ["not a real-model quality evaluation", "not browser verification",
-                        "does not exercise MySQL, Chroma or cloud deployment"],
+                        "database backend not independently identified by this script; no cloud deployment verification"],
         "duration_seconds": round(time.monotonic() - started, 3), "stages": stages,
         "resource_count": len(resources), "question_count": len(questions), "score": evaluation["score"],
         "profile_version_before": profile_version, "profile_version_after": profile_update["version"],

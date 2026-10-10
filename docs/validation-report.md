@@ -1,6 +1,6 @@
 # 公开版本验证记录
 
-验证日期：2026-10-10 至 2026-10-11（Asia/Shanghai）。对象是个人公开仓库的本地副本，基于提交 `b0007c063126cdca8e2ef4b970386592d925bc53` 加本次尚未提交的优化，不是原团队版本或线上实例。
+验证日期：2026-10-10 至 2026-10-11（Asia/Shanghai）。本地实现、测试和录像已提交于 [`a0dea72`](https://github.com/Richard-Lee0419/-EduPath/commit/a0dea7288af58728146ef95a708957816ddad722)，基于公开主分支 `b0007c063126cdca8e2ef4b970386592d925bc53`。对象不是原团队版本或线上实例；收尾改动公开在 [草稿 PR #1](https://github.com/Richard-Lee0419/-EduPath/pull/1)，未合并 main 或部署。
 
 本记录区分实际执行、源码检查和未验证项。生成模式、版本变化及通过测试只证明相应工程流程，不证明教学效果或真实模型质量。
 
@@ -23,6 +23,8 @@
 | Shell 语法 | Git Bash `bash -n` 检查验证/CI脚本，包括 Docker 启动器 | 通过 |
 | 本地 CI 启动器 | Windows Git Bash `EDUPATH_BROWSER_TESTS=true bash scripts/ci-learning-flow.sh` | 启动新 H2/AI/Vite 服务，两份 HTTP smoke 与 2 项 E2E 均通过，退出 0 |
 | 配置文件 | PyYAML 解析 Compose 与 CI YAML | 通过；不等于 Docker 启动成功或 GitHub Actions 运行成功 |
+| GitHub Actions | [run 38067679122](https://github.com/Richard-Lee0419/-EduPath/actions/runs/38067679122) | 三组通过，提交 `a0dea72`，见下文 |
+| 真实开发 Docker | Ubuntu 24.04 CI 启动 Compose | MySQL 8.4/18 次迁移、Chroma、HTTP 学习闭环和知识库生命周期通过；不等于生产部署 |
 | 部署文件 | `bash scripts/production-readiness-check.sh` | 文件及静态配置检查通过；不能据此宣称生产就绪 |
 | 缺依赖时失败 | 无 Maven / Docker 的脚本预检 | 返回 1 并提示缺失工具，没有跳过后宣称全部通过 |
 
@@ -134,12 +136,25 @@ bash scripts/ci-learning-flow.sh
 
 该脚本启动确定性 AI 和 H2 Java 服务，等待健康检查，运行两份真实 HTTP smoke；设置 `EDUPATH_BROWSER_TESTS=true` 时同时管理 Vite 并执行浏览器验证，结束时关闭自己启动的进程。本机于 Windows Git Bash 实际运行完整启动器，HTTP 与两项 E2E 均通过（该轮浏览器用时 13.6 秒）。输出在忽略的 `output/validation/` 中，启动器退出 0。没有将这次 Windows 执行视为 Linux 或远程 Actions 验证。
 
-[CI 工作流](../.github/workflows/ci.yml) 在 push、PR 和手工触发时执行前端测试/构建、Java/Python 测试、HTTP 与浏览器流程，并保存报告。独立 Docker 任务启动开发组合，验证 MySQL 和 Chroma 下的学习与知识库流程，保留容器日志；仅在一次性 CI 环境退出时删除本次项目卷。**当前仅完成配置和本地验证，尚未提交或推送，因此没有本次远程 Actions 成功记录。**
+[CI 工作流](../.github/workflows/ci.yml) 在 push、PR 和手工触发时执行前端测试/构建、Java/Python 测试、HTTP 与浏览器流程，并保存报告。独立 Docker 任务启动开发组合，验证 MySQL 和 Chroma 下的学习与知识库流程，保留容器日志；仅在一次性 CI 环境退出时删除本次项目卷。
+
+## 已执行的 GitHub CI 与开发 Docker
+
+[运行 38067679122](https://github.com/Richard-Lee0419/-EduPath/actions/runs/38067679122) 在 2026-10-11 00:26–00:29（Asia/Shanghai）执行，PR 头提交为 `a0dea7288af58728146ef95a708957816ddad722`，`frontend`、`backend-ai`、`docker-integration` 三项结论均为 `success`。同次 push 的重复运行被并发组取消，取消不计为失败或通过。
+
+- Ubuntu 24.04.5 上从锁文件/依赖配置重新安装，前端 29 项行为断言及静态检查、类型检查、构建通过。
+- Java 56 项（失败/错误/跳过均 0）；Python 77 项及脚本 1 项通过。真实 HTTP 与 2 项 Linux Chromium 用例通过。
+- 开发 Docker 实际启动前端、Java、AI、MySQL 和 Chroma。容器日志记录 `jdbc:mysql://mysql:3306/edupath (MySQL 8.4)`，18 次 Flyway 迁移成功；MySQL 实际镜像版本为 8.4.11，Chroma 镜像为 0.5.23。
+- Docker 学习流程的五个任务成功，三类资源与三题落库、评分及画像/路径 1→2 成功；知识库测试显式核对 `vector_provider=chroma`，上传可检索、重建不重复、Safety 拒绝不入索引、删除不影响另一文档和清理均通过。
+
+脱敏快照见 [CI 汇总](evidence/github-ci.json)、[Docker 学习流程](evidence/docker-learning-flow.json)、[Docker 知识库生命周期](evidence/docker-kb-lifecycle.json)。完整日志、JUnit XML、浏览器报告在上述 run 的 artifacts 中；仓库不复制登录 token 或原始 trace。首轮 Docker 学习脚本的历史通用限制误写“未使用 MySQL/Chroma”；应以其容器上下文与另一个 Chroma 验证记录判断，后续脚本已改为明确记录向量提供方及“数据库类型由外部日志确认”。这属于证据措辞修正，没有改写首轮运行结果。
+
+首轮成功后固定 CI runner 为 Ubuntu 24.04，并更新 artifact action 到已确认存在的 v7，避免 `ubuntu-latest` 即将迁移和 Node 20 弃用提醒；后续运行以 PR 检查为准。开发 Compose 通过不代表生产镜像、OSS、真实 embedding 或线上版本已验证。Flyway 对 MySQL 8.4 的版本提醒和前端 chunk 体积提醒保留。
 
 ## 仍无法确认的内容
 
-- Docker 本机不可用：没有实际执行 Compose 启动、MySQL、Chroma、生产镜像、OSS 或云部署；YAML 解析不替代这些检查。
+- Docker 本机不可用；开发 Compose/MySQL/Chroma 已在 GitHub Linux runner 实际通过。生产镜像、OSS、云部署仍未验证。
 - Tabbit CLI 的初次诊断受本机注册限制；未绕过检查或重启用户浏览器。后续使用项目独立安装的 Playwright Chromium 完成 E2E 与录屏。
 - 真实模型只完成上述两项小样本；真实 embedding 没有运行。不宣称模型准确率、稳定延迟或检索提升。
 - 本次没有创建真实学习效果实验、补造用户反馈或将合成数据视为真实学生。
-- 在线实例可能与该工作区不同；本次改动尚未发布，不能把线上的行为当成优化后版本证据。
+- 在线实例可能与该工作区不同；本次仅发布分支和草稿 PR，没有合并或部署，不能把线上的行为当成优化后版本证据。
