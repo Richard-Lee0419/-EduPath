@@ -8,7 +8,7 @@
 
 > 视频来自本仓库本地代码，使用合成账号和确定性开发模式，实际执行网页操作与跨服务请求。原在线实例可能与仓库版本不同。小规模真实模型验证中，画像通过，讲义因本次较低输出上限导致 JSON 截断，详见验证记录。项目没有已验证的学习成绩提升或正式用户研究结论。
 
-![本地浏览器生成的三类资源](docs/evidence/demo-resource-package.png)
+![知径 EduPath 学习入口与功能中心](docs/images/learning-home.png)
 
 ## 解决的问题
 
@@ -79,6 +79,8 @@ docker compose up --build
 | http://localhost:8000/runtime | AI 运行模式，检查是否配置真实模型 |
 
 开发口令只用于演示；教师账号为 `teacher / 123456`。线上实例的账号可用性以实际响应为准。停止本地服务使用 `docker compose down`；不加 `-v` 时保留数据库卷。
+
+![知径 EduPath 登录界面](docs/images/login-page.png)
 
 ### 不使用 Docker
 
