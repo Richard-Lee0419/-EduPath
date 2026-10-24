@@ -1,0 +1,297 @@
+{
+  "schema": "edupath.agentarts.workflow/v1",
+  "name": "edupath-learning-flow",
+  "display_name": "知径 · 课程学习闭环",
+  "version": "1.0.0",
+  "description": "画像 → 检索 → 规划 → 并行生成 → 质量/安全门禁 → 发布 → 路径。测验分支：评估 → 重规划。",
+  "note": "本文件是工作流的可读声明，用于在 AgentArts 画布中逐节点复建，不是平台官方导入格式。节点名称以控制台实际为准。",
+  "inputs": {
+    "message": {"type": "string", "required": true, "description": "学生自然语言输入"},
+    "course_id": {"type": "integer", "default": 1},
+    "session_id": {"type": "string", "default": "demo-session"},
+    "student_id": {"type": "string", "default": "stu-demo-001"}
+  },
+  "model_defaults": {
+    "provider": "MaaS",
+    "model": "DeepSeek-V4-Flash",
+    "temperature": 0.3,
+    "max_output_tokens": 8192,
+    "response_format": "json"
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "name": "开始",
+      "outputs": ["message", "course_id", "session_id", "student_id"]
+    },
+    {
+      "id": "intent",
+      "type": "llm",
+      "name": "意图识别",
+      "prompt": "prompts/orchestrator.md",
+      "temperature": 0.2,
+      "outputs": ["intent", "confidence", "knowledge_point", "resource_types", "difficulty", "reason", "clarify"]
+    },
+    {
+      "id": "branch_intent",
+      "type": "condition",
+      "name": "意图分支",
+      "cases": [
+        {"when": "intent == 'tutor'", "to": "retrieve_tutor"},
+        {"when": "intent == 'quiz'", "to": "evaluate_quiz"},
+        {"when": "intent == 'learn'", "to": "confirm_course"},
+        {"else": true, "to": "clarify"}
+      ]
+    },
+    {
+      "id": "confirm_course",
+      "type": "code",
+      "name": "课程/知识点校验",
+      "logic": "校验 course_id 与 knowledge_point 是否在课程大纲内；不合法则回退到默认知识点并记录 warning。",
+      "outputs": ["course_id", "knowledge_point", "valid"]
+    },
+    {
+      "id": "profile",
+      "type": "mcp",
+      "name": "读取学习画像",
+      "tool": "edupath_get_profile",
+      "arguments": {"student_id": "{{start.student_id}}", "message": "{{start.message}}"},
+      "timeout_seconds": 30,
+      "fallback": "使用匿名画像并在结果中标注 profile_source=anonymous"
+    },
+    {
+      "id": "retrieve",
+      "type": "knowledge",
+      "name": "课程知识库检索",
+      "knowledge_base": "edupath-course-kb",
+      "query": "{{start.message}} {{intent.knowledge_point}} 讲义 图解",
+      "top_k": 5,
+      "score_threshold": 0.35,
+      "filters": {"course_id": "{{confirm_course.course_id}}"},
+      "citation": true,
+      "outputs": ["evidence", "top_score", "decision"]
+    },
+    {
+      "id": "plan",
+      "type": "llm",
+      "name": "资源规划",
+      "prompt": "prompts/planner.md",
+      "temperature": 0.3,
+      "inputs": ["profile.profile", "retrieve.evidence", "intent.resource_types", "intent.difficulty"],
+      "outputs": ["resource_types", "difficulty", "order", "estimated_minutes", "rationale", "success_criteria"]
+    },
+    {
+      "id": "generate_lecture",
+      "type": "llm",
+      "name": "生成讲义",
+      "parallel_group": "generate",
+      "prompt": "prompts/generator.md",
+      "temperature": 0.4,
+      "inputs": ["plan", "retrieve.evidence", "profile.profile"],
+      "outputs": ["title", "content_markdown", "evidence_chunk_ids", "personalized_reason"]
+    },
+    {
+      "id": "generate_mindmap",
+      "type": "llm",
+      "name": "生成知识图谱",
+      "parallel_group": "generate",
+      "prompt": "prompts/generator.md",
+      "temperature": 0.4,
+      "inputs": ["plan", "retrieve.evidence", "profile.profile"],
+      "outputs": ["title", "mindmap_json", "evidence_chunk_ids"]
+    },
+    {
+      "id": "generate_quiz",
+      "type": "llm",
+      "name": "生成练习题",
+      "parallel_group": "generate",
+      "prompt": "prompts/generator.md",
+      "temperature": 0.4,
+      "inputs": ["plan", "retrieve.evidence", "profile.profile"],
+      "outputs": ["title", "questions", "evidence_chunk_ids"]
+    },
+    {
+      "id": "quality",
+      "type": "llm",
+      "name": "质量门禁",
+      "prompt": "prompts/evaluator.md",
+      "temperature": 0.0,
+      "inputs": ["generate_lecture", "generate_mindmap", "generate_quiz", "retrieve.evidence"],
+      "outputs": ["total_score", "grade", "gate_passed", "dimensions", "issues", "recommendations", "decision"]
+    },
+    {
+      "id": "quality_gate",
+      "type": "condition",
+      "name": "质量分支",
+      "cases": [
+        {"when": "quality.decision == 'publish'", "to": "safety"},
+        {"when": "quality.decision == 'revise'", "to": "revise"},
+        {"else": true, "to": "reject"}
+      ]
+    },
+    {
+      "id": "safety",
+      "type": "llm",
+      "name": "安全审核",
+      "prompt": "prompts/safety.md",
+      "temperature": 0.0,
+      "inputs": ["generate_lecture", "generate_mindmap", "generate_quiz", "start.message"],
+      "outputs": ["passed", "risk_level", "issues", "suggestions", "checks"]
+    },
+    {
+      "id": "safety_gate",
+      "type": "condition",
+      "name": "安全分支",
+      "cases": [
+        {"when": "safety.passed == true", "to": "publish"},
+        {"else": true, "to": "blocked"}
+      ]
+    },
+    {
+      "id": "publish",
+      "type": "mcp",
+      "name": "落库/发布",
+      "tool": "edupath_generate_learning_resource",
+      "arguments": {
+        "course_id": "{{confirm_course.course_id}}",
+        "knowledge_point": "{{confirm_course.knowledge_point}}",
+        "resource_types": "{{plan.resource_types}}",
+        "difficulty": "{{plan.difficulty}}",
+        "student_profile": "{{profile.profile}}"
+      },
+      "idempotency_key": "{{start.session_id}}-{{start.message_hash}}",
+      "timeout_seconds": 120
+    },
+    {
+      "id": "path",
+      "type": "mcp",
+      "name": "生成学习路径",
+      "tool": "edupath_plan_learning_path",
+      "arguments": {
+        "course_id": "{{confirm_course.course_id}}",
+        "target": "{{profile.profile.learning_goal}}",
+        "days": 3,
+        "daily_minutes": 30,
+        "student_profile": "{{profile.profile}}"
+      },
+      "timeout_seconds": 90
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "name": "结束",
+      "outputs": ["artifacts", "trace", "metrics", "quality", "safety", "path"]
+    },
+    {
+      "id": "tutor",
+      "type": "llm",
+      "name": "辅导回答",
+      "prompt": "prompts/tutor.md",
+      "temperature": 0.3,
+      "inputs": ["start.message", "retrieve_tutor.evidence", "profile.profile"],
+      "outputs": ["answer_markdown", "steps", "citations", "confidence", "next_action"]
+    },
+    {
+      "id": "retrieve_tutor",
+      "type": "knowledge",
+      "name": "辅导检索",
+      "knowledge_base": "edupath-course-kb",
+      "query": "{{start.message}}",
+      "top_k": 3,
+      "score_threshold": 0.35,
+      "citation": true
+    },
+    {
+      "id": "evaluate_quiz",
+      "type": "mcp",
+      "name": "测验分析",
+      "tool": "edupath_analyze_quiz_result",
+      "arguments": {"score": "{{start.score}}", "question_results": "{{start.question_results}}", "course_id": "{{start.course_id}}"},
+      "timeout_seconds": 60
+    },
+    {
+      "id": "replan",
+      "type": "mcp",
+      "name": "路径重规划",
+      "tool": "edupath_plan_learning_path",
+      "arguments": {
+        "course_id": "{{start.course_id}}",
+        "target": "根据最近测验调整学习路径",
+        "days": 3,
+        "daily_minutes": 30,
+        "student_profile": "{{profile.profile}}"
+      },
+      "timeout_seconds": 90
+    },
+    {
+      "id": "clarify",
+      "type": "llm",
+      "name": "澄清问题",
+      "prompt": "prompts/orchestrator.md",
+      "temperature": 0.2
+    },
+    {
+      "id": "revise",
+      "type": "end",
+      "name": "返回草稿与改进项",
+      "outputs": ["draft", "quality.issues", "quality.recommendations"]
+    },
+    {
+      "id": "reject",
+      "type": "end",
+      "name": "拒绝发布",
+      "outputs": ["quality.issues", "decision=reject"]
+    },
+    {
+      "id": "blocked",
+      "type": "end",
+      "name": "安全拦截",
+      "outputs": ["safety.issues", "safety.suggestions", "blocked=true"]
+    }
+  ],
+  "edges": [
+    {"from": "start", "to": "intent"},
+    {"from": "intent", "to": "branch_intent"},
+    {"from": "branch_intent", "to": "confirm_course", "when": "learn"},
+    {"from": "branch_intent", "to": "retrieve_tutor", "when": "tutor"},
+    {"from": "branch_intent", "to": "evaluate_quiz", "when": "quiz"},
+    {"from": "branch_intent", "to": "clarify", "when": "unknown"},
+    {"from": "confirm_course", "to": "profile"},
+    {"from": "confirm_course", "to": "retrieve"},
+    {"from": "profile", "to": "plan"},
+    {"from": "retrieve", "to": "plan"},
+    {"from": "plan", "to": "generate_lecture"},
+    {"from": "plan", "to": "generate_mindmap"},
+    {"from": "plan", "to": "generate_quiz"},
+    {"from": "generate_lecture", "to": "quality"},
+    {"from": "generate_mindmap", "to": "quality"},
+    {"from": "generate_quiz", "to": "quality"},
+    {"from": "quality", "to": "quality_gate"},
+    {"from": "quality_gate", "to": "safety", "when": "publish"},
+    {"from": "quality_gate", "to": "revise", "when": "revise"},
+    {"from": "quality_gate", "to": "reject", "when": "reject"},
+    {"from": "safety", "to": "safety_gate"},
+    {"from": "safety_gate", "to": "publish", "when": "passed"},
+    {"from": "safety_gate", "to": "blocked", "when": "blocked"},
+    {"from": "publish", "to": "path"},
+    {"from": "path", "to": "end"},
+    {"from": "retrieve_tutor", "to": "tutor"},
+    {"from": "tutor", "to": "safety"},
+    {"from": "evaluate_quiz", "to": "replan"},
+    {"from": "replan", "to": "end"},
+    {"from": "clarify", "to": "end"}
+  ],
+  "publish": {
+    "channel": ["api", "web"],
+    "auth": "api_key",
+    "streaming": true,
+    "session": true,
+    "citation": true,
+    "rate_limit": "30 req/min per key"
+  },
+  "observability": {
+    "trace": ["node_id", "tool", "latency_ms", "tokens", "decision", "error"],
+    "log_redaction": ["student_name", "phone", "email", "api_key"]
+  }
+}

@@ -1,0 +1,277 @@
+{
+  "schema": "edupath.agentarts.mcp-tools/v1",
+  "server": "edupath-agentarts-bridge",
+  "transport": [
+    "stdio",
+    "http-jsonrpc",
+    "http-sse"
+  ],
+  "endpoints": {
+    "jsonrpc": "/api/mcp",
+    "sse": "/api/mcp/sse"
+  },
+  "tool_count": 10,
+  "tools": [
+    {
+      "name": "edupath_get_profile",
+      "description": "读取或增量提取学生的版本化学习画像：目标、薄弱点、偏好、时间预算、错因模式。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "student_id": {
+            "type": "string",
+            "description": "脱敏学生 ID"
+          },
+          "message": {
+            "type": "string",
+            "description": "学生自述；为空时读取已有画像"
+          }
+        }
+      }
+    },
+    {
+      "name": "edupath_search_knowledge",
+      "description": "在课程知识库中做证据检索，返回 chunk、来源、许可证与匹配分数；生成内容必须引用返回的 chunk_id。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "检索问题或知识点"
+          },
+          "course_id": {
+            "type": "integer",
+            "default": 1
+          },
+          "top_k": {
+            "type": "integer",
+            "default": 4,
+            "minimum": 1,
+            "maximum": 8
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "edupath_plan_resource_bundle",
+      "description": "根据学习目标、薄弱点和时间预算，规划资源类型组合、难度与验收标准。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "string"
+          },
+          "weak_points": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resource_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "basic",
+              "medium",
+              "advanced"
+            ]
+          }
+        },
+        "required": [
+          "goal"
+        ]
+      }
+    },
+    {
+      "name": "edupath_generate_learning_resource",
+      "description": "生成带课程证据的结构化学习资源（讲义/导图/题库/代码实验），并返回质量门禁与安全审核结果。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "default": 1
+          },
+          "knowledge_point": {
+            "type": "string",
+            "default": "二叉树遍历"
+          },
+          "resource_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "basic",
+              "medium",
+              "advanced"
+            ]
+          },
+          "student_profile": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "knowledge_point"
+        ]
+      }
+    },
+    {
+      "name": "edupath_plan_learning_path",
+      "description": "按天规划学习路径，返回每日主题、任务、时长、预期产出与证据；支持测验后重规划。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "default": 1
+          },
+          "target": {
+            "type": "string"
+          },
+          "days": {
+            "type": "integer",
+            "default": 3,
+            "minimum": 1,
+            "maximum": 7
+          },
+          "daily_minutes": {
+            "type": "integer",
+            "default": 30
+          },
+          "student_profile": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    {
+      "name": "edupath_answer_with_evidence",
+      "description": "课程辅导问答：只依据检索到的课程证据回答，返回步骤、引用与置信度。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          },
+          "course_id": {
+            "type": "integer",
+            "default": 1
+          },
+          "answer_mode": {
+            "type": "string",
+            "enum": [
+              "hint",
+              "socratic",
+              "step_by_step",
+              "summary",
+              "code_first"
+            ]
+          }
+        },
+        "required": [
+          "question"
+        ]
+      }
+    },
+    {
+      "name": "edupath_generate_quiz",
+      "description": "生成 1-3 道带解析与证据的单选题，用于查漏补缺。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "default": 1
+          },
+          "knowledge_point": {
+            "type": "string"
+          },
+          "question_count": {
+            "type": "integer",
+            "default": 3,
+            "minimum": 1,
+            "maximum": 3
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "basic",
+              "medium",
+              "advanced"
+            ]
+          }
+        },
+        "required": [
+          "knowledge_point"
+        ]
+      }
+    },
+    {
+      "name": "edupath_analyze_quiz_result",
+      "description": "分析测验作答，输出掌握度、薄弱点、错因模式与下一步动作；分数由业务系统确定性计算。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "score": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "question_results": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "course_id": {
+            "type": "integer",
+            "default": 1
+          }
+        },
+        "required": [
+          "score"
+        ]
+      }
+    },
+    {
+      "name": "edupath_review_safety",
+      "description": "对生成内容或用户输入做安全审核：学术诚信、隐私、事实性与价值观。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    },
+    {
+      "name": "edupath_get_course_outline",
+      "description": "返回课程与知识点大纲，用于 AgentArts 工作流选择课程/知识点。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "default": 1
+          }
+        }
+      }
+    }
+  ]
+}

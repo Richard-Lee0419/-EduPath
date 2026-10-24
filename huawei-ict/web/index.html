@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="知径 EduPath · 基于华为云 AgentArts 的课程学习多智能体演示" />
+  <title>知径 EduPath · AgentArts 课程学习多智能体</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <svg class="sprite" aria-hidden="true">
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 2l1.9 5.2L19 9l-5.1 1.8L12 16l-1.9-5.2L5 9l5.1-1.8L12 2z"/><path d="M19 15l.9 2.4L22 18l-2.1.7L19 21l-.9-2.3L16 18l2.1-.6L19 15z"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.2 4.2L19 7"/></symbol>
+    <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5.5" rx="7.5" ry="3"/><path d="M4.5 5.5v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6M4.5 11.5v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.3-2.9 7.6-7 9.5-4.1-1.9-7-5.2-7-9.5V6l7-3z"/><path d="M9 12l2 2 4-4.5"/></symbol>
+    <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="6" cy="19" r="2.2"/><path d="M6 7.2v9.6M8.2 5h3.3c3.4 0 4.3 2.2 4.3 4.5v0c0 3.1-2 4.5-4.3 4.5H8.2"/></symbol>
+    <symbol id="i-tool" viewBox="0 0 24 24"><path d="M14.5 6.5a4 4 0 105.1 5.1L21 10l-7-7-1.5 1.5 2 2z"/><path d="M10.5 8.5L3 16v5h5l7.5-7.5"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 016.5 3H20v15H6.5A2.5 2.5 0 004 20.5v-15z"/><path d="M4 20.5A2.5 2.5 0 016.5 18H20"/></symbol>
+    <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l2.2-6 3.6 12 2.2-6H21"/></symbol>
+  </svg>
+
+  <div class="page">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">径</div>
+        <div class="brand-copy">
+          <strong>知径 EduPath</strong>
+          <span>AgentArts 课程学习多智能体</span>
+        </div>
+      </div>
+      <div class="topbar-center">
+        <span class="competition-badge">第十一届华为 ICT 大赛 · 中国创新赛 赛题 2</span>
+      </div>
+      <div class="topbar-actions">
+        <span class="runtime-pill" id="runtimePill"><i></i><em>正在连接</em></span>
+        <button class="ghost-btn" id="archBtn" type="button">平台架构</button>
+        <button class="primary-btn" id="runBtn" type="button">
+          <svg><use href="#i-spark"></use></svg>
+          <span>运行演示</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="shell">
+      <aside class="rail rail-left">
+        <section class="card profile-card">
+          <div class="card-kicker">
+            <span>学习者画像</span>
+            <span class="version-chip" id="profileVersion">v3</span>
+          </div>
+          <div class="person">
+            <div class="avatar">林</div>
+            <div>
+              <h2 id="profileName">林同学</h2>
+              <p id="profileMeta">计算机科学与技术 · 大二</p>
+            </div>
+          </div>
+          <p class="goal" id="profileGoal">三天内掌握二叉树递归遍历，能独立写出前序、中序、后序代码并解释调用栈。</p>
+          <div class="field">
+            <span class="field-label">薄弱点</span>
+            <div class="chips" id="weakChips"></div>
+          </div>
+          <div class="field">
+            <span class="field-label">偏好</span>
+            <div class="chips soft" id="prefChips"></div>
+          </div>
+          <div class="profile-foot">
+            <div>
+              <span class="field-label">学习节奏</span>
+              <strong id="profilePace">每天 30 分钟 · 3 天</strong>
+            </div>
+            <div class="confidence">
+              <span class="field-label">画像置信度</span>
+              <strong id="profileConfidence">82%</strong>
+            </div>
+          </div>
+          <div class="confidence-bar"><i id="confidenceBar"></i></div>
+          <p class="profile-reason" id="profileReason">上次小测中“中序/前序混淆”出现 2 次，薄弱点权重上调。</p>
+        </section>
+
+        <section class="card course-card">
+          <div class="card-kicker"><span>课程与知识点</span><span class="live-dot">2 门课</span></div>
+          <div class="segmented" id="courseTabs"></div>
+          <div class="kp-list" id="kpList"></div>
+        </section>
+
+        <section class="card kb-card">
+          <div class="card-kicker"><span>课程知识库</span><span class="version-chip">已启用</span></div>
+          <div class="kb-stat">
+            <div><strong>108</strong><span>公开文档</span></div>
+            <div><strong>1,200+</strong><span>语义切片</span></div>
+            <div><strong>5</strong><span>命中证据</span></div>
+          </div>
+          <div class="kb-meta">
+            <span><svg><use href="#i-db"></use></svg> pangu_embedding</span>
+            <span>pangu_rerank</span>
+          </div>
+          <p class="kb-note">证据均保留来源、许可证与 chunk_id；生成内容必须引用。</p>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <section class="card prompt-card">
+          <div class="prompt-head">
+            <div>
+              <span class="card-kicker">学习任务</span>
+              <h1>让 Agent 先读懂你，再生成学习方案</h1>
+            </div>
+            <span class="workflow-chip"><svg><use href="#i-branch"></use></svg> resource_learning.workflow</span>
+          </div>
+          <div class="prompt-box">
+            <textarea id="promptInput" rows="2" spellcheck="false">我递归总是绕晕，想要一份二叉树遍历的图解讲义，最好带 3 道题。</textarea>
+            <div class="prompt-tools">
+              <div class="preset-row" id="presetRow">
+                <button class="preset active" data-preset="basic" type="button">零基础图解</button>
+                <button class="preset" data-preset="exam" type="button">明天小测</button>
+                <button class="preset" data-preset="advanced" type="button">理解本质</button>
+              </div>
+              <button class="send-btn" id="sendBtn" type="button" aria-label="开始生成">
+                <svg><use href="#i-arrow"></use></svg>
+              </button>
+            </div>
+          </div>
+          <div class="prompt-foot">
+            <span><b>输入</b> 自述 / 课程 / 薄弱点</span>
+            <span><b>编排</b> 画像 → 检索 → 规划 → 生成 → 评估 → 安全</span>
+            <span><b>输出</b> 讲义 · 导图 · 练习 · 路径</span>
+          </div>
+        </section>
+
+        <section class="card trace-card">
+          <div class="trace-head">
+            <div>
+              <span class="card-kicker">Agent 协作轨迹</span>
+              <h2 id="traceTitle">等待运行</h2>
+            </div>
+            <div class="trace-meta">
+              <span class="status-chip" id="traceStatus"><i></i> 待运行</span>
+              <span class="mono" id="traceTime">—</span>
+            </div>
+          </div>
+          <div class="trace-list" id="traceList"></div>
+        </section>
+
+        <section class="card output-card">
+          <div class="output-head">
+            <div class="tabs" id="artifactTabs" role="tablist">
+              <button class="tab active" data-tab="lecture" type="button" role="tab">定制讲义</button>
+              <button class="tab" data-tab="mindmap" type="button" role="tab">知识图谱</button>
+              <button class="tab" data-tab="quiz" type="button" role="tab">查漏练习</button>
+              <button class="tab" data-tab="path" type="button" role="tab">学习路径</button>
+            </div>
+            <span class="artifact-meta" id="artifactMeta">等待生成</span>
+          </div>
+          <div class="artifact-body" id="artifactBody">
+            <div class="empty-state">
+              <div class="empty-orbit"><span></span><span></span><span></span><b>径</b></div>
+              <h3>一次运行，产出四类学习资产</h3>
+              <p>讲义、知识图谱、查漏练习和学习路径由不同 Agent 协作生成，每一条结论都能回到课程证据。</p>
+              <button class="primary-btn compact" id="emptyRunBtn" type="button"><svg><use href="#i-spark"></use></svg>开始演示</button>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <aside class="rail rail-right">
+        <section class="card evidence-card">
+          <div class="card-kicker"><span>课程证据</span><span class="mono" id="evidenceCount">0 条</span></div>
+          <div class="evidence-list" id="evidenceList">
+            <div class="skeleton-line w80"></div>
+            <div class="skeleton-line w60"></div>
+            <div class="skeleton-line w70"></div>
+          </div>
+          <button class="text-btn" id="evidenceMore" type="button">查看全部证据 <svg><use href="#i-arrow"></use></svg></button>
+        </section>
+
+        <section class="card quality-card">
+          <div class="card-kicker"><span>质量与安全</span><span class="mono" id="qualityMode">fixture</span></div>
+          <div class="score-row">
+            <div class="score-ring" id="scoreRing"><span><b id="qualityScore">—</b><small>质量分</small></span></div>
+            <div class="score-copy">
+              <strong id="qualityGrade">等待生成</strong>
+              <p id="qualitySummary">五维质量门禁 + 安全审核通过后才可发布。</p>
+            </div>
+          </div>
+          <div class="dimension-list" id="dimensionList"></div>
+          <div class="safety-row" id="safetyRow">
+            <svg><use href="#i-shield"></use></svg>
+            <div><strong>安全审核</strong><span>学术诚信 · 隐私 · 事实性 · 价值观</span></div>
+            <em id="safetyStatus">待运行</em>
+          </div>
+        </section>
+
+        <section class="card platform-card">
+          <div class="card-kicker"><span>运行载体</span><span class="huawei-mark">HUAWEI CLOUD</span></div>
+          <div class="platform-title">华为云 AgentArts</div>
+          <p>主智能体 + 7 个角色智能体，工作流编排，平台知识库，自定义 MCP 工具。</p>
+          <div class="platform-grid">
+            <div><span>模型</span><strong>DeepSeek-V4-Flash</strong></div>
+            <div><span>MCP 工具</span><strong>10 个</strong></div>
+            <div><span>工作流节点</span><strong>12 个</strong></div>
+            <div><span>知识库</span><strong>2 门课</strong></div>
+          </div>
+          <button class="ghost-btn wide" id="platformBtn" type="button">查看 AgentArts 设计说明</button>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      <span>知径 EduPath · 第十一届华为 ICT 大赛中国创新赛 · 赛题 2</span>
+      <span id="footerRuntime">本地演示链路 · 未调用云平台</span>
+      <span>所有教学结论均需课程证据支持；演示数据已脱敏。</span>
+    </footer>
+  </div>
+
+  <div class="modal" id="modal" aria-hidden="true">
+    <div class="modal-backdrop" data-close="1"></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-head">
+        <div>
+          <span class="card-kicker">AgentArts 设计说明</span>
+          <h2 id="modalTitle">从场景到上线的完整闭环</h2>
+        </div>
+        <button class="icon-btn" id="modalClose" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="arch-diagram">
+          <div class="arch-row"><div class="arch-node user">学生 / 教师</div></div>
+          <div class="arch-arrow">↓ 对话 · 任务 · SSE</div>
+          <div class="arch-row"><div class="arch-node app">可视化 Demo 页面<small>Vue 设计语言 / 零构建</small></div></div>
+          <div class="arch-arrow">↓ /api/agent/run</div>
+          <div class="arch-row"><div class="arch-node bridge">AgentArts 工作流<small>主控 + 7 角色 · 质量门禁 · 安全门禁</small></div></div>
+          <div class="arch-arrow">↓ MCP / 知识检索</div>
+          <div class="arch-row two">
+            <div class="arch-node kb">平台知识库<small>108 文档 · 1,200+ 切片</small></div>
+            <div class="arch-node mcp">MCP 工具服务<small>10 个课程/画像/评估工具</small></div>
+          </div>
+          <div class="arch-row two">
+            <div class="arch-node service">EduPath 业务服务<small>Java / FastAPI 既有能力</small></div>
+            <div class="arch-node model">MaaS 模型<small>DeepSeek-V4-Flash</small></div>
+          </div>
+        </div>
+        <div class="modal-notes">
+          <div><b>为什么不是通用 ChatBot</b><p>画像版本化、课程证据约束、质量与安全双门禁、测验结果回流路径，形成可解释的学习闭环。</p></div>
+          <div><b>低侵入接入</b><p>不修改原项目代码：通过 MCP 把既有能力注册为工具，AgentArts 负责编排、知识、发布与评测。</p></div>
+          <div><b>可复制</b><p>换课程只替换语料、知识点元数据与评测集；工作流、工具与前端保持稳定。</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" aria-live="polite"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

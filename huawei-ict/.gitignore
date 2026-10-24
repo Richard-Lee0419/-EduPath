@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local runtime
+*.log
+.env
+.env.*
+!.env.example
+
+# Evidence scratch
+evidence/.edge-*/
+evidence/raw-*.png
+evidence/*.tmp
+evidence/ppt-render/
+evidence/docx-render/
+evidence/docx-preview.pdf
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

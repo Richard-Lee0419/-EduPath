@@ -1,0 +1,99 @@
+{
+  "service": "edupath-agentarts-bridge",
+  "version": "1.0.0",
+  "generated_at": "2026-10-24T23:03:06+08:00",
+  "mode": "offline_fixture",
+  "summary": {
+    "passed": 16,
+    "total": 16,
+    "ok": true
+  },
+  "checks": [
+    {
+      "name": "tool count == 10",
+      "passed": true,
+      "detail": "10 tools"
+    },
+    {
+      "name": "tool names unique",
+      "passed": true,
+      "detail": "edupath_get_profile, edupath_search_knowledge, edupath_plan_resource_bundle ..."
+    },
+    {
+      "name": "all tools have JSON schema",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "profile readable",
+      "passed": true,
+      "detail": "mode=demo_fixture"
+    },
+    {
+      "name": "knowledge search returns evidence",
+      "passed": true,
+      "detail": "4 results, top=0.99"
+    },
+    {
+      "name": "evidence keeps source/licence",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "generation returns 3 resource types",
+      "passed": true,
+      "detail": "lecture, mindmap, quiz"
+    },
+    {
+      "name": "quality gate passed",
+      "passed": true,
+      "detail": "score=88.0"
+    },
+    {
+      "name": "safety passed",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "risk text blocked",
+      "passed": true,
+      "detail": "学术诚信：命中规则 代写|代考|帮我考试|直接给答案"
+    },
+    {
+      "name": "local pipeline success",
+      "passed": true,
+      "detail": "9 steps, 6780 ms"
+    },
+    {
+      "name": "trace has 9 steps",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "path has 3 days",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "MCP initialize",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "MCP tools/list",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "MCP tools/call",
+      "passed": true,
+      "detail": ""
+    }
+  ],
+  "pipeline": {
+    "trace_steps": 9,
+    "evidence_count": 5,
+    "quality_score": 88.0,
+    "safety_passed": true
+  }
+}
