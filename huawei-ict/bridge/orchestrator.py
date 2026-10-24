@@ -137,11 +137,19 @@ def run(request: dict[str, Any], task_id: str | None = None) -> dict[str, Any]:
                 session_id=str(request.get("session_id") or "huawei-ict-demo"),
                 context={"course_id": request.get("course_id", 1)},
             )
-            local = run_local(request, task_id=task_id)
-            local["mode"] = "agentarts"
-            local["agentarts"] = raw
-            local["metrics"]["mode"] = "agentarts"
-            return local
+            candidate = _extract_structured_result(raw)
+            if candidate is None:
+                raise RuntimeError(
+                    "AgentArts 返回不是 EduPath 结构化契约。请在工作流结束节点输出 "
+                    "{resources, evidence, trace, quality, safety, path, metrics}，"
+                    "或检查发布端点的响应字段。"
+                )
+            candidate.setdefault("task_id", task_id)
+            candidate["mode"] = "agentarts"
+            candidate["agentarts"] = raw
+            candidate.setdefault("metrics", {})
+            candidate["metrics"]["mode"] = "agentarts"
+            return candidate
         except AgentArtsNotConfigured as exc:
             local = run_local(request, task_id=task_id)
             local["mode"] = "agentarts_not_configured"
@@ -153,6 +161,26 @@ def run(request: dict[str, Any], task_id: str | None = None) -> dict[str, Any]:
             local["warning"] = f"AgentArts 调用失败，已回退到本地演示链路：{type(exc).__name__}: {exc}"
             return local
     return run_local(request, task_id=task_id)
+
+
+def _extract_structured_result(raw: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the platform's structured result only when it matches the bridge contract.
+
+    This prevents local fixture output from being labelled as AgentArts output when
+    the published endpoint returns plain text.
+    """
+
+    payload = raw.get("raw", {}) if isinstance(raw, dict) else {}
+    candidates = [
+        payload.get("result"),
+        payload.get("data"),
+        payload.get("output"),
+        raw.get("answer"),
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, dict) and isinstance(candidate.get("resources"), list):
+            return candidate
+    return None
 
 
 def os_mode() -> str:

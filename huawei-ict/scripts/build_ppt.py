@@ -496,7 +496,7 @@ text(s, "知径 EduPath", 0.8, 0.75, 6.0, 0.6, 30, True, WHITE)
 text(s, "让学习有据可循。", 0.8, 1.45, 8.0, 0.55, 22, False, RGBColor(0x8F, 0xC9, 0xC1))
 text(s, "基于华为云 AgentArts 的课程学习多智能体", 0.8, 2.08, 8.0, 0.35, 11, False, RGBColor(0xB9, 0xC4, 0xCC))
 cols = [
-    ("已完成", ["本地 Demo / MCP / 9 步流水线", "信息表 / 12 页 PPT / 5 张截图", "16 项自检 + 13 项单测"], RGBColor(0x8F, 0xC9, 0xC1)),
+    ("已完成", ["本地 Demo / MCP / 9 步流水线", "信息表 / 12 页 PPT / 5 张截图", "16 项自检 + 14 项单测"], RGBColor(0x8F, 0xC9, 0xC1)),
     ("待完成", ["AgentArts 真实端点联调", "3.5 分钟实机视频", "24 条平台评测"], RGBColor(0xE8, 0xB4, 0x8A)),
     ("边界", ["2 门课，不宣称全学科", "不宣称提分，无对照实验", "fixture 截图已标注未上云"], RGBColor(0xC9, 0xA3, 0xAC)),
 ]

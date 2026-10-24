@@ -1,7 +1,7 @@
 {
   "service": "edupath-agentarts-bridge",
   "version": "1.0.0",
-  "generated_at": "2026-10-24T23:03:06+08:00",
+  "generated_at": "2026-10-24T23:05:38+08:00",
   "mode": "offline_fixture",
   "summary": {
     "passed": 16,

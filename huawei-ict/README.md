@@ -43,7 +43,7 @@ python scripts/selfcheck.py
 python -m unittest discover -s tests -v
 ```
 
-预期：16/16 自检通过，13 项单元测试通过。
+预期：16/16 自检通过，14 项单元测试通过。
 
 ---
 
@@ -65,7 +65,7 @@ huawei-ict/
 ├── submission/              信息表、PPT、提交清单
 ├── evidence/                截图、自检报告
 ├── scripts/                 selfcheck / 运行脚本
-└── tests/                   13 项单元测试
+└── tests/                   14 项单元测试
 ```
 
 ---
@@ -113,7 +113,7 @@ huawei-ict/
 
 | 项 | 状态 |
 | --- | --- |
-| 本地 Demo + MCP + 9 步流水线 | ✅ 已跑通（16/16 自检，13 单测） |
+| 本地 Demo + MCP + 9 步流水线 | ✅ 已跑通（16/16 自检，14 单测） |
 | 作品信息收集表 | ✅ 已按模板填写（个人信息待补） |
 | PPT | ✅ 12 页初稿 |
 | 演示截图 | ✅ 5 张（fixture 模式，页面有标识） |

@@ -64,6 +64,11 @@ class PipelineTests(unittest.TestCase):
         with self.assertRaises(AgentArtsNotConfigured):
             client.invoke("hello")
 
+    def test_structured_result_requires_resources(self) -> None:
+        self.assertIsNone(orchestrator._extract_structured_result({"raw": {"output": "plain text"}}))
+        candidate = {"resources": [{"resource_type": "lecture"}]}
+        self.assertIs(orchestrator._extract_structured_result({"raw": {"result": candidate}}), candidate)
+
 
 class McpProtocolTests(unittest.TestCase):
     def test_initialize(self) -> None:
