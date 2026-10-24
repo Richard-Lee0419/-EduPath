@@ -4,7 +4,9 @@
   "display_name": "知径 · 课程学习闭环",
   "version": "1.0.0",
   "description": "画像 → 检索 → 规划 → 并行生成 → 质量/安全门禁 → 发布 → 路径。测验分支：评估 → 重规划。",
-  "note": "本文件是工作流的可读声明，用于在 AgentArts 画布中逐节点复建，不是平台官方导入格式。节点名称以控制台实际为准。",
+  "main_executable_node_count": 12,
+  "total_node_count": 25,
+  "note": "12 个执行节点指不含开始/结束、条件分支、异常出口与辅导/测验分支的主链路节点；完整声明共 25 个节点。本文件用于在 AgentArts 画布中逐节点复建，不是平台官方导入格式。",
   "inputs": {
     "message": {"type": "string", "required": true, "description": "学生自然语言输入"},
     "course_id": {"type": "integer", "default": 1},

@@ -7,7 +7,7 @@
 ```text
 agentarts/
 ├── README.md                 本文件
-├── workflow.json             12 节点工作流声明（节点/边/参数/发布）
+├── workflow.json             工作流声明（12 个执行节点；含分支共 25 个节点）
 ├── knowledge_base.md         平台知识库配置卡 + 命中测试记录
 ├── mcp_tools.json            MCP 工具清单（由 bridge 生成）
 ├── evaluation_set.jsonl      24 条评测样本
