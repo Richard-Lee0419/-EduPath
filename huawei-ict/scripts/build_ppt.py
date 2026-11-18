@@ -135,6 +135,22 @@ def picture(s, path, x, y, w, h, border=True):
     return pic
 
 
+def picture_fit(s, path, x, y, w, h, border=True):
+    """Place the whole image inside the box without cropping (centered)."""
+
+    path = str(path)
+    iw, ih = Image.open(path).size
+    scale = min(w / iw, h / ih)
+    nw, nh = iw * scale, ih * scale
+    left = x + (w - nw) / 2
+    top = y + (h - nh) / 2
+    pic = s.shapes.add_picture(path, Inches(left), Inches(top), Inches(nw), Inches(nh))
+    if border:
+        pic.line.color.rgb = LINE
+        pic.line.width = Pt(1)
+    return pic
+
+
 def header(s, number, section, title, dark=False):
     color = WHITE if dark else INK
     sub = RGBColor(0xB9, 0xC4, 0xCC) if dark else MUTED
@@ -157,7 +173,7 @@ def pill(s, label, x, y, w, fill, color, size=9):
 # ------------------------------------------------------------------ slide 1
 s = slide(DARK)
 # Right image panel
-picture(s, EVIDENCE / "demo-home.png", 7.15, 0.55, 5.75, 6.35, border=False)
+picture_fit(s, EVIDENCE / "live-ui" / "home.png", 7.15, 0.55, 5.75, 6.35, border=True)
 rect(s, 7.15, 0.55, 5.75, 6.35, None, RGBColor(0x3A, 0x4C, 0x5A), False, 1)
 rect(s, 0, 0, 0.16, 7.5, RED)
 rect(s, 0.85, 0.75, 0.52, 0.52, RED, None, True)
@@ -411,18 +427,18 @@ footer(s, 8)
 s = slide()
 header(s, "08", "Demo", "一个学生、一门课、一次完整学习任务")
 shots = [
-    ("demo-home.png", "01  画像与任务", "一句话输入，进入工作流"),
-    ("demo-quiz.png", "02  练习与评估", "3 题查漏，错因回流路径"),
-    ("demo-path.png", "03  三日路径", "按薄弱点排任务与时长"),
+    ("home-crop.png", "01  学习首页", "画像、今日任务与推荐依据"),
+    ("resource-crop.png", "02  资源生成", "按薄弱点生成个性化资源包"),
+    ("path-crop.png", "03  学习路径", "按测评动态调整路径"),
 ]
 for index, (name, title_, caption) in enumerate(shots):
     x = 0.7 + index * 4.12
-    picture(s, EVIDENCE / name, x, 1.85, 3.86, 2.55, border=True)
+    picture(s, EVIDENCE / "live-ui" / name, x, 1.85, 3.86, 2.55, border=True)
     text(s, title_, x, 4.52, 3.86, 0.3, 11.5, True, INK)
-    text(s, caption, x, 4.85, 3.86, 0.3, 9, False, MUTED)
+    text(s, caption, x, 4.85, 3.86, 0.3, 8.5, False, MUTED)
 rect(s, 0.7, 5.45, 11.95, 0.8, DARK, None, True)
-text(s, "9 步轨迹   ·   5 条课程证据   ·   3 类资源   ·   88 分质量门禁   ·   4 项安全通过", 0.95, 5.62, 11.5, 0.35, 12.5, True, WHITE, PP_ALIGN.CENTER)
-text(s, "截图来自 offline fixture 彩排，页面明确标注“本地演示 · 未上云”；正式提交前替换为 AgentArts 端点截图。", 0.7, 6.5, 11.9, 0.3, 8.5, False, FAINT)
+text(s, "画像   →   资源生成   →   学习路径   →   学习评估", 0.95, 5.62, 11.5, 0.35, 12.5, True, WHITE, PP_ALIGN.CENTER)
+text(s, "产品界面截图来自原项目线上实例（8.136.194.87，2026-10-28）；平台段在 3 分钟视频中展示。", 0.7, 6.5, 11.9, 0.3, 8.5, False, FAINT)
 footer(s, 9)
 
 # ------------------------------------------------------------------ slide 10
@@ -496,9 +512,9 @@ text(s, "知径 EduPath", 0.8, 0.75, 6.0, 0.6, 30, True, WHITE)
 text(s, "让学习有据可循。", 0.8, 1.45, 8.0, 0.55, 22, False, RGBColor(0x8F, 0xC9, 0xC1))
 text(s, "基于华为云 AgentArts 的课程学习多智能体", 0.8, 2.08, 8.0, 0.35, 11, False, RGBColor(0xB9, 0xC4, 0xCC))
 cols = [
-    ("已完成", ["本地 Demo / MCP / 9 步流水线", "信息表 / 12 页 PPT / 5 张截图", "16 项自检 + 14 项单测"], RGBColor(0x8F, 0xC9, 0xC1)),
-    ("待完成", ["AgentArts 真实端点联调", "3.5 分钟实机视频", "24 条平台评测"], RGBColor(0xE8, 0xB4, 0x8A)),
-    ("边界", ["2 门课，不宣称全学科", "不宣称提分，无对照实验", "fixture 截图已标注未上云"], RGBColor(0xC9, 0xA3, 0xAC)),
+    ("已完成", ["原项目前端 / 知识库与工作流配置", "信息表 / 12 页 PPT / 产品截图", "16 项自检 + 14 项单测"], RGBColor(0x8F, 0xC9, 0xC1)),
+    ("待完成", ["AgentArts 真实端点联调", "3 分钟实机视频", "24 条平台评测"], RGBColor(0xE8, 0xB4, 0x8A)),
+    ("边界", ["2 门课，不宣称全学科", "不宣称提分，无对照实验", "产品截图来自原项目"], RGBColor(0xC9, 0xA3, 0xAC)),
 ]
 for index, (title_, items, color) in enumerate(cols):
     x = 0.8 + index * 4.1

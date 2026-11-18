@@ -1,9 +1,35 @@
 # 证据与截图
 
-> 所有截图均来自 `huawei-ict` 本地 `fixture` 彩排模式，页面右上角明确标注“本地演示 · 未上云”。
-> 正式提交前，请用 AgentArts 真实端点重跑并替换；不要把这些截图说成平台运行结果。
+> **提交材料的产品界面使用 `live-ui/` 下的原项目线上实例截图**（2026-10-28，https://8.136.194.87/）。
+> `demo-*.png` 是自研 Demo 的技术备份，`original-ui/` 是旧素材备份，均不进入 docx/PPT/视频。
+> 平台截图需在 AgentArts 开通后补。
 
 ## 文件
+
+### 原项目线上实例（提交用）
+
+| 文件 | 内容 | 来源 |
+| --- | --- | --- |
+| `live-ui/home.png` | 学习首页 | 线上实例实拍 |
+| `live-ui/path.png` | 学习路径 | 线上实例实拍 |
+| `live-ui/evaluation.png` | 学习评估 67% | 线上实例实拍 |
+| `live-ui/resources.png` | 资源生成全页 | 线上实例实拍 |
+| `live-ui/resource-top.png` | 资源生成/质量监测 | 线上实例实拍 |
+| `live-ui/profile.png` | 画像对话/档案 | 线上实例实拍 |
+| `live-ui/home-crop.png` | PPT 16:10 裁切 | PPT 第 9 页 |
+| `live-ui/resource-crop.png` | PPT 16:10 裁切 | PPT 第 9 页 |
+| `live-ui/path-crop.png` | PPT 16:10 裁切 | PPT 第 9 页 |
+| `live-ui/docx-showcase-live.png` | 首页 + 评估合成图 | 信息表“作品展示” |
+
+### 旧素材备份（不进入提交材料）
+
+| 文件 | 内容 | 来源 |
+| --- | --- | --- |
+| `original-ui/orig-home.png` | 学习首页（旧基线） | 原项目历史截图 |
+| `original-ui/orig-resource.png` | 资源生成（旧基线） | 原项目历史截图 |
+| `original-ui/docx-showcase-original.png` | 旧版合成图 | 旧素材 |
+
+### 自研 Demo 备份（不进入提交材料）
 
 | 文件 | 内容 | 来源 |
 | --- | --- | --- |
@@ -12,7 +38,6 @@
 | `demo-mindmap.png` | 知识图谱 | `?demo=done&full=1&tab=mindmap` |
 | `demo-quiz.png` | 3 题查漏练习 | `?demo=done&full=1&tab=quiz` |
 | `demo-path.png` | 三日学习路径 | `?demo=done&full=1&tab=path` |
-| `docx-showcase.png` | 信息表“作品展示”用双图合成 | `demo-home` + `demo-quiz` 等高等宽 |
 | `selfcheck.json` | 16 项离线自检结果 | `python scripts/selfcheck.py` |
 
 ## 复现截图

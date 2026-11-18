@@ -93,6 +93,19 @@ def allow_row_split(table):
             tr_pr.remove(tr_pr.find(qn("w:cantSplit")))
 
 
+def remove_trailing_empty_paragraphs(document):
+    """Drop the template's empty paragraphs after the table to avoid a blank page."""
+
+    body = document.element.body
+    for child in reversed(list(body)):
+        if child.tag == qn("w:sectPr"):
+            continue
+        if child.tag == qn("w:p") and not "".join(child.itertext()).strip():
+            body.remove(child)
+        else:
+            break
+
+
 def main() -> None:
     if not TEMPLATE.exists():
         raise SystemExit(f"template not found: {TEMPLATE}")
@@ -171,13 +184,13 @@ def main() -> None:
             ("四、知识库/语料", True),
             "2 门课、108 篇公开语料（cp-algorithms、OpenDSA、RISC-V ISA Manual、lowRISC Ibex），保留固定 commit、许可证、归属与中文适配说明。结构感知分段保留标题路径；平台知识库配置 pangu_embedding + pangu_rerank，top_k=5、阈值 0.35；命中测试含 3 条强命中 + 1 条弱命中（用于验证“该拒答时拒答”）。",
             ("五、自定义 MCP / Skill", True),
-            "10 个工具：画像读取、课程检索、资源规划、资源生成、路径规划、证据辅导、出题、测验分析、安全审核、课程大纲。支持 stdio、HTTP JSON-RPC 与 HTTP+SSE；返回结构化 JSON，并标注运行来源（fixture / EduPath AI / AgentArts），不把演示数据说成模型输出。",
+            "10 个工具：画像读取、课程检索、资源规划、资源生成、路径规划、证据辅导、出题、测验分析、安全审核、课程大纲。支持 stdio、HTTP JSON-RPC 与 HTTP+SSE；返回结构化 JSON，并标注运行来源（本地演示 / EduPath AI / AgentArts），不把演示数据说成模型输出。",
             ("六、模型与资产", True),
             "主模型 DeepSeek-V4-Flash（MaaS 预置，备选盘古）；embedding/rerank 用 pangu_embedding/pangu_rerank；温度按角色设置（画像/评估/安全 0–0.1，规划 0.3，生成 0.4）；JSON Schema 校验，失败重试 1 次后降级模板。",
             ("七、效果与指标", True),
-            "演示链路：9 步 Agent 轨迹、5 条课程证据、3 类资源、质量 88/100（A）、安全 4 项通过、3 天路径。工程验证（原项目公开记录）：AI 82 项、Java 56 项、前端 29 项断言、2 项 Chromium E2E 通过；真实 HTTP 五任务闭环；知识库上传→检索→重建→拒绝→删除。以上证明工程流程，不宣称学习成绩提升；学习效果需后续班级试点。",
+            "线上实例：画像置信度 55%、学习评估掌握度 67%、资源质量监测 90.5/100、门禁通过率 83%、6 个有效评测资源、0 回归告警。工程验证（原项目公开记录）：AI 82 项、Java 56 项、前端 29 项断言、2 项 Chromium E2E 通过；真实 HTTP 五任务闭环；知识库上传→检索→重建→拒绝→删除。以上证明工程流程，不宣称学习成绩提升；学习效果需后续班级试点。",
             ("八、材料与复现", True),
-            "提供可视化 Demo（零构建，离线可跑）、3.5 分钟视频脚本、5 张演示截图、AgentArts 配置包（提示词/工作流/知识库/评测集）、部署文档与 GitHub 比赛分支。评委可按文档在 AgentArts 内复建，并用 24 条评测集回归。",
+            "提供原项目产品前端（本机/线上可运行）、3 分钟视频脚本、原项目线上实例截图、AgentArts 配置包（提示词/工作流/知识库/评测集）、部署文档与 GitHub 比赛分支。评委可按文档在 AgentArts 内复建，并用 24 条评测集回归。",
         ],
         size=9.2,
     )
@@ -186,10 +199,12 @@ def main() -> None:
     set_cell(
         show_cell,
         [
-            ("在线 Demo：", True),
-            "本地运行 python -m bridge.gateway --port 8765；正式在线地址待部署后补充。",
+            ("产品界面：", True),
+            "原项目前端（学习首页 / 资源生成 / 学习路径 / 学习评估），本机与线上均可运行；下方为原项目线上实例截图（2026-10-28）。",
+            ("AgentArts 智能体：", True),
+            "按 docs/05 在 AgentArts 平台完成知识库、3 节点工作流与发布后，补充平台截图与调用记录。",
             ("演示视频：", True),
-            "3.5 分钟，按 docs/06 脚本录制；正式链接待补充。",
+            "3 分钟以内，产品段使用原项目前端，平台段使用 AgentArts 控制台；正式链接待录制。",
             ("代码与配置：", True),
             "https://github.com/Richard-Lee0419/-EduPath/tree/huawei-ict-2026/huawei-ict",
             ("分享帖：", True),
@@ -197,8 +212,9 @@ def main() -> None:
         ],
         size=9.5,
     )
-    add_images(show_cell, [ROOT / "evidence" / "docx-showcase.png"], width_inches=5.4)
+    add_images(show_cell, [ROOT / "evidence" / "live-ui" / "docx-showcase-live.png"], width_inches=5.4)
 
+    remove_trailing_empty_paragraphs(document)
     document.save(OUT)
     print(f"written: {OUT}")
     print(f"size: {OUT.stat().st_size / 1024:.0f} KB")

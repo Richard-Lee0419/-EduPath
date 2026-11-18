@@ -12,6 +12,8 @@ venv/
 .env
 .env.*
 !.env.example
+.tools/
+node_modules/
 
 # Evidence scratch
 evidence/.edge-*/
@@ -25,3 +27,6 @@ evidence/docx-preview.pdf
 .DS_Store
 Thumbs.db
 desktop.ini
+
+tmp-docs/
+
