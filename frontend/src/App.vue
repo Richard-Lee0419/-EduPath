@@ -244,7 +244,7 @@ onBeforeUnmount(() => {
     <KnowledgeBase v-else-if="currentPage === 'knowledgeBase'" :user="user" />
     <Tutor v-else-if="currentPage === 'tutor'" @navigate="navigate" />
     <Quiz v-else-if="currentPage === 'quiz'" />
-    <Evaluation v-else-if="currentPage === 'evaluation'" @navigate="navigate" />
+    <Evaluation v-else-if="currentPage === 'evaluation'" :show-student-practice="user?.role === 'student'" @navigate="navigate" />
     <TeacherInsights v-else-if="currentPage === 'teacherInsights'" />
     <TaskCenter v-else-if="currentPage === 'taskCenter'" />
     <UserCenter v-else :user="user" @navigate="navigate" @logout="handleLogout" @exit="handleExit()" />

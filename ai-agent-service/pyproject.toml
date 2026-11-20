@@ -38,3 +38,6 @@ testpaths = ["tests"]
 [tool.setuptools.packages.find]
 include = ["app*"]
 exclude = ["data*", "tests*"]
+
+[tool.setuptools.package-data]
+"app.rag" = ["cache-address-diagnosis.md", "binary-tree-traversal.md"]

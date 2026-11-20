@@ -245,6 +245,14 @@ public class AiAgentClient {
         return postForMap("/resource/repair", payload == null ? Map.of() : payload);
     }
 
+    public Map<String, Object> diagnoseCachePractice(String query) {
+        return postForMap("/evaluation/cache-practice/diagnose", Map.of("query", query));
+    }
+
+    public Map<String, Object> diagnoseTreePractice(Map<String, Object> problem) {
+        return postForMap("/evaluation/tree-practice/diagnose", problem);
+    }
+
     public Map<String, Object> evaluationReport() {
         return getForMap("/evaluation/report");
     }

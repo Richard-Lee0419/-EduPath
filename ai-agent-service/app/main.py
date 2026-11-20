@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import evaluation_api, kb_api, path_api, profile_api, quiz_api, resource_api, task_api, tutor_api
+from app.api import cache_practice_api, evaluation_api, kb_api, path_api, profile_api, quiz_api, resource_api, task_api, tree_practice_api, tutor_api
 from app.core.config import settings
 from app.rag.retriever import retriever
 
@@ -63,5 +63,7 @@ app.include_router(tutor_api.router)
 app.include_router(path_api.router)
 app.include_router(quiz_api.router)
 app.include_router(evaluation_api.router)
+app.include_router(cache_practice_api.router)
+app.include_router(tree_practice_api.router)
 app.include_router(kb_api.router)
 app.include_router(task_api.router)

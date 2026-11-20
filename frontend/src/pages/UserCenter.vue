@@ -67,7 +67,7 @@ const records = computed(() => {
 
 const dataStats = computed(() => [
   { label: '资源数量', value: `${resourceTotal.value} 个`, delta: '真实资源库' },
-  { label: '掌握度', value: `${report.value?.overallScore ?? 0}%`, delta: '来自评估报告' },
+  { label: '最近测验得分', value: report.value?.reportId ? `${report.value.overallScore} 分` : '暂无记录', delta: '来自评估报告' },
   { label: '薄弱点', value: `${profile.value?.weakPoints.length ?? 0} 个`, delta: '画像聚类' },
   { label: '登录身份', value: props.user.role, delta: '当前 JWT 登录态' },
 ]);

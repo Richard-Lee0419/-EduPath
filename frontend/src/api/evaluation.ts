@@ -24,7 +24,8 @@ export const mapEvaluationReport = (raw: RawMap): EvaluationReport => ({
   reportId: String(raw.report_id || ''),
   studentId: String(raw.student_id || ''),
   quizId: Number(raw.quiz_id || 0),
-  overallScore: Number(raw.overall_score || raw.score || 0),
+  overallScore: Number(raw.overall_score ?? raw.score ?? 0),
+  submittedAt: typeof raw.submitted_at === 'string' ? raw.submitted_at : undefined,
   mastery: Array.isArray(raw.mastery)
     ? raw.mastery.map((item) => {
         const mastery = item as RawMap;
@@ -32,6 +33,7 @@ export const mapEvaluationReport = (raw: RawMap): EvaluationReport => ({
           knowledgePoint: String(mastery.knowledge_point || mastery.name || ''),
           masteryScore: Number(mastery.mastery_score || mastery.score || 0),
           level: String(mastery.level || ''),
+          attempts: typeof mastery.attempts === 'number' ? mastery.attempts : undefined,
         };
       })
     : [],

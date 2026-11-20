@@ -1533,6 +1533,25 @@ AI 服务只向外部模型发送去标识化画像维度和本次检索的课�
 }
 ```
 
+### GET `/api/evaluation/cache-practice`
+
+学生读取自己的 Cache 专项练习。服务端通过 JWT 确认学生身份。响应 `data` 包含 `stage`（`initial`、`retest` 或 `complete`）、`next_exercise`、`initial`、`retest` 与 `focus`。暂无内容的字段可为空或省略。题目含 `id`、`address_bits`、`capacity_bytes`、`block_bytes` 与 `ways`。进入复测前，服务端按首次诊断错因选择新题。
+
+已提交的作答包含 `exercise`、`answer`、`submitted_at` 和 `feedback`。反馈包含 `correct`、`expected`、`mistake`、`explanation`、`citation`。引用返回公开讲义的 `document`、`section`、`excerpt`、`scope`、`source_version` 与 `marker`。在配置为 AgentArts 且云端成功返回时，`feedback.provenance` 另含 `source`、`request_id` 和 `execution_id`。本地与旧记录可省略该对象。读接口只公开已保存作答的标准答案。
+
+### POST `/api/evaluation/cache-practice/attempts`
+
+请求示例 `{"exercise_id":"cache-v1-initial","tag":20,"index":8,"offset":4}`。三个字段必须为 0 至 128 的整数。成功返回更新后的同一练习状态。重复提交同题同答案返回已保存记录，提交不同答案或跳过当前题返回 409。未登录返回 401，其他角色返回 403，诊断服务失败或引用校验未通过返回 502，可用原答案重试。专项练习使用独立记录。
+
+
+### GET `/api/evaluation/tree-practice`
+
+学生读取自己的二叉树递归遍历专项练习。返回与 Cache 相同的状态和作答结构。题目含 `id`、`order`（`preorder`、`inorder` 或 `postorder`）、`nodes`。第一个元素为根，节点含 `id`、`left` 和 `right`，为空的孩子可省略。已保存作答的 `answer` 与 `feedback.expected` 为节点字母数组。错因区分访问时机、左右顺序、遗漏或重复、其他顺序错误。引用指向相应公开讲义小节。访问时机分支的新复测为 `tree-v2-timing`，继续要求前序。已提交的 `tree-v1-timing` 记录保留原中序题和判定。
+
+### POST `/api/evaluation/tree-practice/attempts`
+
+请求示例 `{"exercise_id":"tree-v1-initial","sequence":["A","C","F","E","B","D"]}`。序列含 1 至 24 个单个英文字母组成的数组，服务端按大写规范化。身份校验、幂等、乱序与诊断失败行为沿用 Cache 接口。两门课各自恢复学习记录。
+
 ## 11. 后端运营接口
 
 ### 用户管理

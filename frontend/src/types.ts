@@ -194,6 +194,7 @@ export interface EvaluationMastery {
   knowledgePoint: string;
   masteryScore: number;
   level: string;
+  attempts?: number;
 }
 
 export interface EvaluationReport {
@@ -201,6 +202,7 @@ export interface EvaluationReport {
   studentId: string;
   quizId: number;
   overallScore: number;
+  submittedAt?: string;
   mastery: EvaluationMastery[];
   weakPoints: string[];
   mistakePatterns: string[];
