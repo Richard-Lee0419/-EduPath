@@ -1,10 +1,10 @@
 # 知径 EduPath
 
-面向《数据结构与算法》《计算机组成原理》的学习 Web 应用，将学习画像、课程证据检索、资源生成、路径规划和测验反馈连接起来。学生可从具体薄弱点开始学习，查看生成内容的依据，再用练习结果调整下一步；教师端提供班级洞察、教学任务和课程资料管理。
+面向高校课程学习的 Web 应用，内置《数据结构与算法》和《计算机组成原理》。学生可以根据学习画像获取资源和路径、查看生成内容的课程证据，再用测验结果调整学习计划，也可以上传自己的 PDF 讲义。教师可以开设班级课程、上传讲义，并通过班级洞察和教学任务跟进学习进度。
 
 这是软件杯 A3 团队项目的个人公开版本，由团队快照整理后持续维护。Richard-Lee0419 主要负责前端/UI与 AI 模块，并参与后端；部署主要由队友完成。代码基础、个人扩展和代表性提交见 [贡献说明](CONTRIBUTIONS.md)。
 
-**快速入口：** [核心流程视频](https://github.com/Richard-Lee0419/-EduPath/releases/download/demo-video-2026-10-11/edupath-demo.mp4) · [演示说明](docs/demo-guide.md) · [验证记录](docs/validation-report.md) · [设计取舍](docs/engineering-decisions.md) · [原在线实例](https://8.136.194.87/) · [旧版介绍存档](docs/history/README-before-portfolio-review.md)
+**快速入口：** [核心流程视频](https://github.com/Richard-Lee0419/-EduPath/releases/download/demo-video-2026-10-11/edupath-demo.mp4) · [班级课程与个人 PDF](#班级课程与个人-pdf) · [演示说明](docs/demo-guide.md) · [验证记录](docs/validation-report.md) · [设计取舍](docs/engineering-decisions.md) · [原在线实例](https://8.136.194.87/) · [旧版介绍存档](docs/history/README-before-portfolio-review.md)
 
 > 核心流程视频为作者提供的 3 分钟项目演示（MP4）；确定性开发模式下的自动化录屏另见[演示说明](docs/demo-guide.md)。原在线实例可能与仓库版本不同。小规模真实模型验证中，画像通过，讲义因本次较低输出上限导致 JSON 截断，详见验证记录。项目没有已验证的学习成绩提升或正式用户研究结论。
 
@@ -28,12 +28,25 @@
 | 资源学习 | 生成个性化讲义、思维导图、题库、代码实验、流程图、拓展阅读，展示结构化内容与课程证据。 |
 | 路径与辅导 | 规划学习顺序，基于检索内容辅导；练习反馈可触发路径调整。 |
 | 测验评估 | 保存题目与作答，形成评估，并关联画像与路径变化。 |
-| 教师支持 | 班级洞察、教学任务、知识库上传与维护。 |
+| 教师支持 | 开设班级课程、批量上传 PDF、管理入库状态、向指定班级发布课程，并查看班级洞察。 |
+| 学生个人资料 | 上传个人 PDF，选定一份资料提问，查看相关片段与原页。 |
 | 任务进度 | 任务 ID、状态查询、SSE、取消、重新执行及刷新后重新连接已有任务。 |
 
 DFS 的交互图解可展示图结构、访问顺序与递归栈。代码实验是内容和练习引导，当前没有隔离的在线代码执行沙箱。旧 `animation_script` 类型保留历史兼容，不在六类可选资源中。
 
-AI 模块按规划、检索、生成、辅导、评估和安全审核分工，通过 Pydantic 结构传递结果。各角色由编排代码调用，不代表多个自主系统独立讨论。检索实际入口是课程/知识点过滤与向量适配器；BM25 和自适应 MMR 的独立代码尚未接入该入口，详见 [当前检索链路](docs/learner-adaptive-rag.md)。
+AI 模块按规划、检索、生成、辅导、评估和安全审核分工，通过 Pydantic 结构传递结果。课程知识库按课程和知识点过滤，并用向量适配器检索，自适应 MMR 保留为独立实验。个人 PDF 辅导在选定文件内使用 BM25 对候选片段排序。课程检索实现见 [当前检索链路](docs/learner-adaptive-rag.md)。
+
+## 班级课程与个人 PDF
+
+| 使用者 | 在哪里操作 | 资料如何使用 |
+| --- | --- | --- |
+| 教师 | 「教师工作台 → 班级课程管理」 | 创建课程和知识点，批量上传讲义并检查索引状态。至少一份资料入库后，可向指定班级发布，也可撤回课程。 |
+| 班内学生 | 「学习首页 → 我的班级课程」 | 已发布课程与内置课程使用同一套学习入口。学生可看资料、按课程提问、生成学习资源、做测验、查看评估和规划路径。答疑引用可打开 PDF 原页。 |
+| 上传个人资料的学生 | 「智能辅导 → 个人 PDF 辅导」 | 上传自己的讲义，选定一份后提问。回答提供相关原文、学习提示和页码，文件仅本人可访问。 |
+
+班级讲义按物理页提取文字并切分，通过内容审核后进入该课程的 RAG 向量索引。班级资料限获授权的班级和课程管理者使用。班级 PDF 的证据与个人 PDF 的问题、回答均在应用内处理。
+
+两种入口都支持可提取文字的未加密 PDF，每份最多 8 MiB、100 页。扫描件需要先做文字识别。个人账号最多保留 10 份资料。接口与权限见 [API 契约](api-contract.md)。
 
 ## 架构与代码入口
 
@@ -128,9 +141,9 @@ python -m pytest
 
 [CI 配置](.github/workflows/ci.yml) 执行前端测试/构建、Java/Python 测试、真实 HTTP 与 Chromium 学习闭环、知识库生命周期，并在独立任务中启动开发 Compose 验证 MySQL/Chroma。[修复后的远程检查](https://github.com/Richard-Lee0419/-EduPath/actions/runs/38068948500) 三组全部通过，包括真实 Chroma 的干扰片段回归；此前的检索失败、提交及结果范围见 [验证记录](docs/validation-report.md)。已启动隔离本地服务时，可执行 `python scripts/smoke_learning_flow.py --output output/validation/learning-flow.json`，知识库检查使用 `python scripts/smoke_knowledge_lifecycle.py --confirm-isolated-local`。这些命令创建合成账号或资料，只允许本地 HTTP 地址，勿连接生产数据库。
 
-浏览器验证与重新录制见 [演示说明](docs/demo-guide.md)，执行 `npm run test:e2e` 或 `npm run test:e2e:record`。本地已通过两项无接口 mock 的浏览器测试；自动化录屏覆盖学生流程，教师拒绝上传由另一项测试验证。
+本地端到端测试使用合成账号和文本型 PDF，通过真实的前后端接口验证个人资料隔离、原页引用、班级课程发布、学生学习和撤回后的访问权限。在已启动的本地测试环境中可以运行 `npm run test:e2e`，详见 [演示说明](docs/demo-guide.md)。[浏览器测试源码](frontend/e2e/learning-flow.spec.ts)
 
-本次收尾与合并记录见 [PR #1](https://github.com/Richard-Lee0419/-EduPath/pull/1)。README 的成果对应此版本；本轮没有部署线上实例，原在线实例不自动代表它。优化前的完整介绍及当时的技术文档入口保留在 [旧版介绍存档](docs/history/README-before-portfolio-review.md)，提交历史继续保留。
+PDF 功能已在本地验收。原在线实例对应之前的部署版本。早期合并记录见 [PR #1](https://github.com/Richard-Lee0419/-EduPath/pull/1)，早期介绍与技术文档入口见 [旧版介绍存档](docs/history/README-before-portfolio-review.md)。
 
 已知边界：
 
