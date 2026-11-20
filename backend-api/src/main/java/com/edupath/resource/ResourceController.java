@@ -5,6 +5,11 @@ import com.edupath.common.ApiResponse;
 import com.edupath.auth.RoleGuard;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.http.CacheControl;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -138,6 +143,16 @@ public class ResourceController {
     @Operation(summary = "获取资源签名下载链接")
     public ApiResponse<ResourceService.ResourceDownloadUrl> downloadUrl(@PathVariable String resourceId) {
         return ApiResponse.success(resourceService.downloadUrl(resourceId));
+    }
+
+    @GetMapping("/{resourceId}/content")
+    @Operation(summary = "通过课程授权下载资源")
+    public ResponseEntity<byte[]> download(@PathVariable String resourceId) {
+        var resource = resourceService.download(resourceId);
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(resource.filename()).build().toString())
+                .header("X-Content-Type-Options", "nosniff")
+                .body(resource.bytes());
     }
 
     @PatchMapping("/{resourceId}/status")

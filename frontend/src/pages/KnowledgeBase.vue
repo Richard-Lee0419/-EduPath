@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { getCourses } from '../api/course';
+import { getCourses, getKnowledgePoints, learningCourses, requestedCourseId } from '../api/course';
 import { listKnowledgeDocuments, searchKnowledgeBase, uploadKnowledgeDocument } from '../api/kb';
+import CoursePdfPreview from '../components/CoursePdfPreview.vue';
 import SplitText from '../components/SplitText.vue';
 import type { KnowledgeCorpusSummary } from '../api/kb';
 import type { User } from '../types';
+import type { Course, KnowledgePoint } from '@/types/api';
 
 const props = defineProps<{
   user?: User;
 }>();
 
 const selectedCourseId = ref<number | null>(null);
-const courses = ref<Array<{ id: number; name: string }>>([]);
+const courses = ref<Course[]>([]);
 const evidenceSnippets = ref<
   Array<{
     source: string;
@@ -22,17 +24,23 @@ const evidenceSnippets = ref<
     licenseStatus: string;
     documentType: string;
     containsExamples: boolean;
+    chunkId: string;
+    documentId?: number;
+    page?: number;
   }>
 >([]);
-const documents = ref<Array<{ title: string; state: string; indexStatus: string; tone: 'doc' | 'slide' | 'task'; builtIn?: boolean }>>([]);
+const documents = ref<Array<{ id?: number; title: string; state: string; indexStatus: string; tone: 'doc' | 'slide' | 'task'; builtIn?: boolean }>>([]);
 const searchQuery = ref('');
 const corpusSummary = ref<KnowledgeCorpusSummary | null>(null);
+const courseTopics = ref<KnowledgePoint[]>([]);
 const loading = ref(true);
 const uploading = ref(false);
 const errorMessage = ref('');
 const uploadErrorMessage = ref('');
 const visibleErrorMessage = computed(() => [uploadErrorMessage.value, errorMessage.value].filter(Boolean).join('；'));
 const fileInput = ref<HTMLInputElement | null>(null);
+const preview = ref<InstanceType<typeof CoursePdfPreview> | null>(null);
+let loadVersion = 0;
 
 const canManageKnowledgeBase = computed(() => props.user?.role === 'teacher' || props.user?.role === 'admin');
 const indexedCount = computed(() => documents.value.filter((doc) => doc.indexStatus === 'indexed').length);
@@ -43,8 +51,10 @@ const searchableMaterialCount = computed(() => {
 const documentRows = computed(() => {
   if (documents.value.length) return documents.value;
   return evidenceSnippets.value.map((item, index) => ({
+    id: undefined,
     title: item.chapter,
     state: `内置课程语料 / ${item.tag}`,
+    indexStatus: '',
     tone: (index % 3 === 0 ? 'doc' : index % 3 === 1 ? 'slide' : 'task') as 'doc' | 'slide' | 'task',
     builtIn: true,
   }));
@@ -55,7 +65,9 @@ const graphNodes = computed(() => {
   const merged = titles.filter(Boolean);
   return [root, ...Array.from(new Set(merged)).slice(0, 8)];
 });
-const selectedCourseName = computed(() => courses.value.find((course) => course.id === selectedCourseId.value)?.name || '');
+const selectedCourse = computed(() => courses.value.find((course) => course.id === selectedCourseId.value));
+const selectedCourseName = computed(() => selectedCourse.value?.name || '');
+const classCourse = computed(() => selectedCourse.value?.visibility === 'class');
 const graphBranches = computed(() => [
   {
     title: graphNodes.value[1] || '暂无证据节点',
@@ -88,26 +100,32 @@ const corpusModeLabel = computed(() => {
 });
 
 const loadKnowledgeBase = async () => {
-  if (!selectedCourseId.value) return;
+  const courseId = selectedCourseId.value;
+  if (!courseId) return;
+  const version = ++loadVersion;
   loading.value = true;
   errorMessage.value = '';
   try {
-    const [docRows, search] = await Promise.all([
-      listKnowledgeDocuments({ courseId: selectedCourseId.value }),
+    const [docRows, search, topics] = await Promise.allSettled([
+      listKnowledgeDocuments({ courseId }),
       searchKnowledgeBase(
-        selectedCourseId.value,
+        courseId,
         searchQuery.value.trim() || selectedCourseName.value || '课程知识',
         6,
       ),
+      classCourse.value ? getKnowledgePoints(courseId) : Promise.resolve([]),
     ]);
-    documents.value = docRows.map((doc, index) => ({
+    if (version !== loadVersion) return;
+    courseTopics.value = topics.status === 'fulfilled' ? topics.value : [];
+    documents.value = docRows.status === 'fulfilled' ? docRows.value.map((doc, index) => ({
+      id: doc.id,
       title: doc.filename,
       state: `${doc.parse_status} / ${doc.index_status}`,
       indexStatus: doc.index_status,
       tone: index % 3 === 0 ? 'doc' : index % 3 === 1 ? 'slide' : 'task',
-    }));
-    corpusSummary.value = search.corpus;
-    evidenceSnippets.value = search.results.map((item) => ({
+    })) : [];
+    corpusSummary.value = search.status === 'fulfilled' ? search.value.corpus : null;
+    evidenceSnippets.value = search.status === 'fulfilled' ? search.value.results.map((item) => ({
       source: item.source,
       chapter: item.title,
       tag: `score ${Math.round(item.score * 100)}%`,
@@ -116,11 +134,14 @@ const loadKnowledgeBase = async () => {
       licenseStatus: item.license_status,
       documentType: item.document_type,
       containsExamples: item.contains_examples,
-    }));
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '知识库加载失败';
+      chunkId: item.chunk_id,
+      documentId: item.document_id,
+      page: item.page,
+    })) : [];
+    const failure = [docRows, search, topics].find((result) => result.status === 'rejected');
+    if (failure) errorMessage.value = failure.reason instanceof Error ? failure.reason.message : '知识库部分数据加载失败';
   } finally {
-    loading.value = false;
+    if (version === loadVersion) loading.value = false;
   }
 };
 
@@ -130,6 +151,10 @@ const submitSearch = async () => {
 
 const selectCourse = async (courseId: number) => {
   uploadErrorMessage.value = '';
+  documents.value = [];
+  evidenceSnippets.value = [];
+  courseTopics.value = [];
+  corpusSummary.value = null;
   selectedCourseId.value = courseId;
   await loadKnowledgeBase();
 };
@@ -170,8 +195,14 @@ const handleUpload = async (event: Event) => {
 
 onMounted(async () => {
   try {
-    courses.value = await getCourses();
-    selectedCourseId.value = courses.value[0]?.id ?? null;
+    courses.value = learningCourses(await getCourses());
+    const requested = requestedCourseId();
+    selectedCourseId.value = requested ?? courses.value[0]?.id ?? null;
+    if (requested && !selectedCourse.value) {
+      selectedCourseId.value = null;
+      errorMessage.value = '课程不存在或当前账号没有访问权限。';
+      return;
+    }
     await loadKnowledgeBase();
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '课程数据加载失败';
@@ -188,11 +219,12 @@ onMounted(async () => {
         <SplitText tag="h1" text="课程知识库" />
         <p>AI 回答与资源生成均基于课程知识库。</p>
       </div>
-      <button v-if="canManageKnowledgeBase" class="primary-upload hover-scale" type="button" :disabled="uploading" @click="triggerUpload">
+      <a v-if="canManageKnowledgeBase && classCourse" class="primary-upload hover-scale" href="/teacher-insights">管理班级课程资料</a>
+      <button v-else-if="canManageKnowledgeBase" class="primary-upload hover-scale" type="button" :disabled="uploading" @click="triggerUpload">
         {{ uploading ? '上传中' : '上传课程资料' }}
       </button>
       <input
-        v-if="canManageKnowledgeBase"
+        v-if="canManageKnowledgeBase && !classCourse"
         ref="fileInput"
         class="sr-only"
         type="file"
@@ -207,11 +239,26 @@ onMounted(async () => {
         :key="course.id"
         :class="{ active: selectedCourseId === course.id }"
         type="button"
+        :disabled="uploading"
+        :aria-pressed="selectedCourseId === course.id"
         @click="selectCourse(course.id)"
       >
-        {{ course.name }}
+        {{ course.name }}{{ course.visibility === 'class' ? ' · 班级课程' : '' }}
       </button>
     </div>
+
+    <section v-if="classCourse" class="class-course-overview interactive-card">
+      <h2>{{ selectedCourseName }}</h2>
+      <p v-if="selectedCourse?.description">{{ selectedCourse.description }}</p>
+      <p v-if="courseTopics.length">知识点：{{ courseTopics.map((topic) => topic.name).join('、') }}</p>
+      <nav aria-label="班级课程学习入口">
+        <a :href="`/tutor?course=${selectedCourseId}`">智能辅导</a>
+        <a :href="`/resource-generate?course=${selectedCourseId}`">生成学习资源</a>
+        <a :href="`/quiz?course=${selectedCourseId}`">课程测验</a>
+        <a :href="`/learning-path?course=${selectedCourseId}`">学习路径</a>
+        <a :href="`/evaluation?course=${selectedCourseId}`">学习评估</a>
+      </nav>
+    </section>
 
     <form class="kb-search interactive-card" @submit.prevent="submitSearch">
       <label for="kb-query">检索真实课程知识</label>
@@ -234,7 +281,7 @@ onMounted(async () => {
 
     <section class="kb-layout">
       <main class="kb-main">
-        <article class="knowledge-graph-card interactive-card">
+        <article v-if="!classCourse" class="knowledge-graph-card interactive-card">
           <div class="graph-title">
             <span class="graph-icon"></span>
             <h2>知识图谱</h2>
@@ -266,7 +313,7 @@ onMounted(async () => {
             <h2>证据片段</h2>
           </div>
           <p v-if="loading">正在检索知识库证据...</p>
-          <article v-for="item in evidenceSnippets" :key="item.quote" class="quote-snippet">
+          <article v-for="item in evidenceSnippets" :key="item.chunkId" class="quote-snippet">
             <div class="quote-tags">
               <span>{{ item.source }}</span>
               <span>{{ item.chapter }}</span>
@@ -276,6 +323,7 @@ onMounted(async () => {
             </div>
             <p>“{{ item.quote }}”</p>
             <small class="evidence-meta">{{ item.documentType }} · 授权状态 {{ item.licenseStatus }}</small>
+            <button v-if="item.documentId && item.page" type="button" class="source-link" @click="preview?.open(item.documentId, item.page, item.chapter)">查看 PDF 第 {{ item.page }} 页</button>
           </article>
           <p v-if="!loading && !evidenceSnippets.length">暂无检索证据，请上传课程资料或稍后重试。</p>
         </article>
@@ -306,23 +354,31 @@ onMounted(async () => {
             <button type="button" aria-label="筛选文档">≡</button>
           </div>
           <div class="document-list">
-            <article v-for="doc in documentRows" :key="doc.title" class="document-row" :class="[`doc-${doc.tone}`, { 'is-built-in': doc.builtIn }]">
+            <article v-for="doc in documentRows" :key="doc.id ?? doc.title" class="document-row" :class="[`doc-${doc.tone}`, { 'is-built-in': doc.builtIn }]">
               <span class="doc-icon"></span>
               <div>
                 <strong>{{ doc.title }}</strong>
                 <small>{{ doc.state }}</small>
               </div>
-              <button type="button" aria-label="更多操作">⋮</button>
+              <button v-if="classCourse && doc.id && doc.indexStatus === 'indexed'" type="button" class="source-link" @click="preview?.open(doc.id, 1, doc.title)">查看原文</button>
+              <button v-else-if="!classCourse" type="button" aria-label="更多操作">⋮</button>
             </article>
           </div>
-          <button class="secondary-wide hover-scale" type="button">查看所有文档</button>
+          <p v-if="classCourse && !documents.length && !loading">暂无可学习的 PDF。</p>
+          <button v-else-if="!classCourse" class="secondary-wide hover-scale" type="button">查看所有文档</button>
         </article>
       </aside>
     </section>
+    <CoursePdfPreview ref="preview" />
   </div>
 </template>
 
 <style scoped>
+.class-course-overview { margin-bottom: 24px; padding: 18px 22px; border: 1px solid #d8e9e2; border-radius: 16px; background: #fff; }
+.class-course-overview h2 { margin: 0 0 12px; }
+.class-course-overview nav { display: flex; flex-wrap: wrap; gap: 18px; }
+.class-course-overview a, .source-link { color: #155b4c; text-decoration: underline; }
+.source-link { cursor: pointer; }
 .kb-page {
   min-height: calc(100vh - 72px);
   overflow-x: hidden;

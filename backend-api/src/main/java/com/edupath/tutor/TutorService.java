@@ -3,6 +3,7 @@ package com.edupath.tutor;
 import com.edupath.ai.AiAgentClient;
 import com.edupath.auth.AuthContext;
 import com.edupath.common.ExternalServiceException;
+import com.edupath.course.CourseAccess;
 import com.edupath.course.CourseCatalogService;
 import com.edupath.learning.LearningEventService;
 import java.util.ArrayList;
@@ -23,16 +24,19 @@ public class TutorService {
     private final TutorRepository tutorRepository;
     private final CourseCatalogService courseCatalogService;
     private final LearningEventService learningEventService;
+    private final CourseAccess courseAccess;
 
     public TutorService(
             AiAgentClient aiAgentClient,
             TutorRepository tutorRepository,
             CourseCatalogService courseCatalogService,
-            LearningEventService learningEventService) {
+            LearningEventService learningEventService,
+            CourseAccess courseAccess) {
         this.aiAgentClient = aiAgentClient;
         this.tutorRepository = tutorRepository;
         this.courseCatalogService = courseCatalogService;
         this.learningEventService = learningEventService;
+        this.courseAccess = courseAccess;
     }
 
     @Transactional
@@ -43,25 +47,14 @@ public class TutorService {
         }
         String studentId = AuthContext.currentStudentId();
         long courseId = request.courseId() == null ? 1 : request.courseId();
+        courseAccess.requireReadable(courseId);
+        String existingSession = requireAccessibleSession(request, studentId, courseId);
         Map<String, Object> aiResponse = aiAgentClient.chatTutor(request);
         validateAiResponse(aiResponse);
 
-        boolean followUp = request.sessionId() != null && !request.sessionId().isBlank();
-        String sessionId;
-        if (followUp) {
-            TutorRepository.SessionRow session = tutorRepository.findSession(request.sessionId().trim())
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "辅导会话不存在"));
-            if (!studentId.equals(session.studentId())) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权访问该辅导会话");
-            }
-            if (session.courseId() != courseId) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "追问课程与原辅导会话不一致");
-            }
-            sessionId = session.sessionId();
-        } else {
-            sessionId = tutorRepository.createSession(
-                    studentId, courseId, question.length() > 30 ? question.substring(0, 30) : question);
-        }
+        boolean followUp = existingSession != null;
+        String sessionId = followUp ? existingSession : tutorRepository.createSession(
+                studentId, courseId, question.length() > 30 ? question.substring(0, 30) : question);
         tutorRepository.addMessage(sessionId, "user", question, null);
         tutorRepository.addMessage(
                 sessionId,
@@ -91,6 +84,26 @@ public class TutorService {
                         Map.of("answer_mode", request.normalizedMode()))));
         response.put("learning_update", learningUpdate);
         return response;
+    }
+
+    public void validateChatAccess(TutorChatRequest request) {
+        courseAccess.requireReadable(request.courseId() == null ? 1 : request.courseId());
+        requireAccessibleSession(request, AuthContext.currentStudentId(), request.courseId() == null ? 1 : request.courseId());
+    }
+
+    private String requireAccessibleSession(TutorChatRequest request, String studentId, long courseId) {
+        if (request.sessionId() == null || request.sessionId().isBlank()) {
+            return null;
+        }
+        TutorRepository.SessionRow session = tutorRepository.findSession(request.sessionId().trim())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "辅导会话不存在"));
+        if (!studentId.equals(session.studentId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权访问该辅导会话");
+        }
+        if (session.courseId() != courseId) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "追问课程与原辅导会话不一致");
+        }
+        return session.sessionId();
     }
 
     private String resolveKnowledgePoint(int courseId, String question) {

@@ -9,6 +9,7 @@ import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Predicate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,8 +41,23 @@ public class LearningPathRepository {
                 .findFirst();
     }
 
+    Optional<PathVersion> currentMatching(String studentId, Predicate<PathVersion> filter) {
+        try (var rows = jdbcTemplate.queryForStream("""
+                SELECT path_id, student_id, version, path_payload, source_task_id, created_at, updated_at
+                FROM learning_paths WHERE student_id = ? ORDER BY version DESC, id DESC
+                """, this::mapPath, studentId)) {
+            return rows.filter(filter).findFirst();
+        }
+    }
+
+    @Transactional
     public PathVersion save(String studentId, Map<String, Object> path, String sourceTaskId) {
+        lockStudent(studentId);
         int nextVersion = current(studentId).map(version -> version.version() + 1).orElse(1);
+        return insert(studentId, nextVersion, path, sourceTaskId);
+    }
+
+    private PathVersion insert(String studentId, int nextVersion, Map<String, Object> path, String sourceTaskId) {
         String pathId = "path_" + UUID.randomUUID().toString().replace("-", "");
         jdbcTemplate.update(
                 """
@@ -54,7 +70,10 @@ public class LearningPathRepository {
                 nextVersion,
                 jsonCodec.toJson(path),
                 sourceTaskId);
-        return current(studentId).orElseThrow();
+        return jdbcTemplate.queryForObject("""
+                SELECT path_id, student_id, version, path_payload, source_task_id, created_at, updated_at
+                FROM learning_paths WHERE path_id = ?
+                """, this::mapPath, pathId);
     }
 
     @Transactional
@@ -63,38 +82,21 @@ public class LearningPathRepository {
             String expectedPathId,
             int expectedVersion,
             Map<String, Object> path,
-            String sourceTaskId) {
-        Optional<PathVersion> lockedCurrent = jdbcTemplate
-                .query(
-                        """
-                        SELECT path_id, student_id, version, path_payload, source_task_id, created_at, updated_at
-                        FROM learning_paths
-                        WHERE student_id = ?
-                        ORDER BY version DESC
-                        LIMIT 1 FOR UPDATE
-                        """,
-                        this::mapPath,
-                        studentId)
-                .stream()
-                .findFirst();
+            String sourceTaskId,
+            Predicate<PathVersion> filter) {
+        lockStudent(studentId);
+        Optional<PathVersion> lockedCurrent = currentMatching(studentId, filter);
         if (lockedCurrent.isEmpty()
                 || !lockedCurrent.get().pathId().equals(expectedPathId)
                 || lockedCurrent.get().version() != expectedVersion) {
             return Optional.empty();
         }
-        String pathId = "path_" + UUID.randomUUID().toString().replace("-", "");
-        jdbcTemplate.update(
-                """
-                INSERT INTO learning_paths (
-                    path_id, student_id, version, path_payload, source_task_id, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """,
-                pathId,
-                studentId,
-                expectedVersion + 1,
-                jsonCodec.toJson(path),
-                sourceTaskId);
-        return current(studentId);
+        int nextVersion = current(studentId).map(version -> version.version() + 1).orElse(1);
+        return Optional.of(insert(studentId, nextVersion, path, sourceTaskId));
+    }
+
+    private void lockStudent(String studentId) {
+        jdbcTemplate.queryForList("SELECT id FROM users WHERE username = ? FOR UPDATE", Long.class, studentId);
     }
 
     private PathVersion mapPath(ResultSet rs, int rowNum) throws SQLException {

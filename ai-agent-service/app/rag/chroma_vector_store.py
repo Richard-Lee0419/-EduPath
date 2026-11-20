@@ -44,6 +44,8 @@ class ChromaVectorStore:
         query: str,
         top_k: int = 5,
         knowledge_point_ids: list[int] | None = None,
+        *,
+        require_knowledge_points: bool = True,
     ) -> list[SearchHit]:
         collection = self._get_collection()
         query_embedding = self.embedding_client.embed_dense(query)
@@ -172,6 +174,8 @@ class ChromaVectorStore:
                     heading_path=tuple(
                         value for value in str(metadata.get("heading_path") or "").split("|") if value
                     ),
+                    document_id=int(metadata["document_id"]) if metadata.get("document_id") is not None else None,
+                    page=int(metadata["page"]) if metadata.get("page") is not None else None,
                 )
             )
         return hits
@@ -210,4 +214,6 @@ def _chunk_metadata(chunk: RagChunk) -> dict[str, str | int]:
     }
     if chunk.document_id is not None:
         metadata["document_id"] = chunk.document_id
+    if chunk.page is not None:
+        metadata["page"] = chunk.page
     return metadata

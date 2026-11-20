@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { getCourses, learningCourses, requestedCourseId } from '../api/course';
 import { getEvaluationReport } from '../api/evaluation';
 import SplitText from '../components/SplitText.vue';
 import type { EvaluationReport, PageKey } from '../types';
@@ -11,15 +12,18 @@ defineEmits<{
 const report = ref<EvaluationReport | null>(null);
 const loading = ref(true);
 const errorMessage = ref('');
+const courseId = requestedCourseId();
+const selectedCourseName = ref('');
 
 const diagnosticFlow = [
   { title: '测试结果', tone: 'neutral' },
   { title: '根因诊断', tone: 'weak' },
-  { title: '画像更新', tone: 'data' },
+  { title: courseId ? '本课掌握度' : '画像更新', tone: 'data' },
   { title: '路径调整', tone: 'resource' },
   { title: '资源推荐', tone: 'active' },
 ];
 
+const hasReport = computed(() => Boolean(report.value?.reportId));
 const hasWeakPoints = computed(() => Boolean(report.value?.weakPoints.length));
 const primaryWeakPoint = computed(() => report.value?.weakPoints[0] || '暂无明显薄弱点');
 const primaryFocusPoint = computed(() =>
@@ -28,13 +32,13 @@ const primaryFocusPoint = computed(() =>
   || '完成一次诊断测验',
 );
 const heroDescription = computed(() =>
-  report.value
-    ? `综合掌握度 ${report.value.overallScore}%，下一步建议：${report.value.recommendation}`
+  report.value?.reportId
+    ? `最近一次测验得分 ${report.value.overallScore} 分。${report.value.recommendation}`
     : '尚未形成评估报告。完成一次练习测试后，这里会展示掌握度、错因与下一步建议。',
 );
 
 const summaryCards = computed(() => [
-  { label: '综合掌握度', value: report.value ? `${report.value.overallScore}%` : '尚未评估', tone: 'good' },
+  { label: '最近测验得分', value: report.value?.reportId ? `${report.value.overallScore} 分` : '尚未评估', tone: 'good' },
   { label: '主要弱点', value: primaryWeakPoint.value, tone: 'weak' },
   { label: '错误模式', value: report.value?.mistakePatterns.join('、') || '暂无错误模式', tone: 'data' },
   { label: '下一步建议', value: report.value?.recommendation || '完成测验后生成建议', tone: 'next' },
@@ -60,7 +64,12 @@ const weakCards = computed(() => {
 
 onMounted(async () => {
   try {
-    report.value = await getEvaluationReport();
+    if (courseId) {
+      const course = learningCourses(await getCourses()).find((item) => item.id === courseId);
+      if (!course) throw new Error('课程不存在或当前账号没有访问权限。');
+      selectedCourseName.value = course.name;
+    }
+    report.value = await getEvaluationReport(courseId ?? undefined);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '评估报告加载失败';
   } finally {
@@ -73,7 +82,11 @@ onMounted(async () => {
   <div class="evaluation-page ai-page-bg page-enter">
     <section class="evaluation-hero">
       <SplitText tag="h1" text="学习效果评估报告" />
-      <p v-if="hasWeakPoints">你目前的主要薄弱环节是 <strong>{{ primaryWeakPoint }}</strong>。{{ heroDescription }}</p>
+      <p v-if="selectedCourseName">{{ selectedCourseName }}</p>
+      <p v-if="loading">正在读取评估报告…</p>
+      <p v-else-if="errorMessage" role="alert">{{ errorMessage }}</p>
+      <p v-else-if="!hasReport">{{ heroDescription }}</p>
+      <p v-else-if="hasWeakPoints">你目前的主要薄弱环节是 <strong>{{ primaryWeakPoint }}</strong>。{{ heroDescription }}</p>
       <p v-else class="hero-success">本轮评估<strong>未发现新的明显薄弱点</strong>。{{ heroDescription }}</p>
     </section>
 
@@ -94,25 +107,19 @@ onMounted(async () => {
       </div>
     </section>
 
-    <section v-if="loading" class="evaluation-loading interactive-card">
-      正在生成评估报告...
-    </section>
-    <section v-else-if="errorMessage" class="evaluation-loading interactive-card">
-      {{ errorMessage }}
-    </section>
-
-    <template v-else-if="report">
+    <template v-if="report">
       <section class="evaluation-grid">
         <article class="mastery-panel interactive-card">
           <div class="panel-heading">
             <span class="chart-mark"></span>
-            <h2>知识掌握情况</h2>
+            <h2>知识点历史掌握度</h2>
           </div>
+          <p v-if="report.submittedAt">最近测验交卷 {{ new Date(report.submittedAt).toLocaleString('zh-CN', { hour12: false }) }}</p>
           <p v-if="!report.mastery.length">暂无知识点掌握度记录，请先完成测验。</p>
           <div class="mastery-bars">
             <div v-for="item in report.mastery" :key="item.knowledgePoint" class="mastery-bar-row">
               <div>
-                <span>{{ item.knowledgePoint }}</span>
+                <span>{{ item.knowledgePoint }}<small v-if="item.attempts !== undefined"> · {{ item.attempts }} 次作答</small></span>
                 <strong>{{ item.masteryScore }}%</strong>
               </div>
               <div class="mastery-track">
@@ -130,15 +137,15 @@ onMounted(async () => {
           </article>
           <article v-if="!weakCards.length" class="weak-card interactive-card weak-card-good">
             <span>当前状态</span>
-            <h2>暂无需补救知识点</h2>
-            <p>本轮测验未发现新增薄弱点，可按建议进入迁移巩固。</p>
+            <h2>{{ hasReport ? '暂无新增薄弱点' : '暂无测验记录' }}</h2>
+            <p>{{ hasReport ? '可按建议进入迁移巩固。' : '完成一次测验后可查看学情。' }}</p>
           </article>
         </aside>
       </section>
 
       <section class="bottom-evaluation-grid">
         <article class="profile-evolution interactive-card">
-          <h2>画像动态演进</h2>
+          <h2>{{ courseId ? '课程诊断' : '画像动态演进' }}</h2>
           <div>
             <span>薄弱环节已更新</span>
             <small>{{ report.weakPoints.join('、') || '暂无新薄弱点' }}</small>
@@ -155,8 +162,11 @@ onMounted(async () => {
             <h2>{{ primaryFocusPoint }}</h2>
             <p>{{ report.recommendation }}</p>
           </div>
-          <button class="next-task-button hover-scale" type="button" @click="$emit('navigate', report ? 'learningPath' : 'quiz')">
-            {{ report ? '更新学习路径并继续' : '去完成一次练习' }}
+          <a v-if="courseId" class="next-task-button hover-scale" :href="`${hasReport ? '/learning-path' : '/quiz'}?course=${courseId}`">
+            {{ hasReport ? '更新学习路径并继续' : '去完成一次练习' }}
+          </a>
+          <button v-else class="next-task-button hover-scale" type="button" @click="$emit('navigate', hasReport ? 'learningPath' : 'quiz')">
+            {{ hasReport ? '更新学习路径并继续' : '去完成一次练习' }}
           </button>
         </article>
       </section>

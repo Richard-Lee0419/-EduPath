@@ -101,6 +101,8 @@ const mapEvidence = (value: unknown): ResourceEvidence[] => Array.isArray(value)
         content: String(raw.content || ''),
         score: Number(raw.score || 0),
         source: String(raw.source || ''),
+        document_id: Number(raw.document_id) || undefined,
+        page: Number(raw.page) || undefined,
       };
     })
   : [];

@@ -23,7 +23,10 @@ class LectureAgent:
             else personalization.reason_for(resource_type, topic)
         )
         evidence_lines = "\n".join(
-            f"- [{item.title}]({item.source})：{item.content[:72]}..." for item in evidence[:3]
+            f"- {item.title}（PDF 第 {item.page} 页）：{item.content[:72]}..."
+            if item.page is not None
+            else f"- [{item.title}]({item.source})：{item.content[:72]}..."
+            for item in evidence[:3]
         )
         content = (
             f"## {title}\n\n"

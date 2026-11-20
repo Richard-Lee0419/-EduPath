@@ -17,13 +17,17 @@ import org.springframework.web.server.ResponseStatusException;
 public class CourseCatalogService {
 
     private final CourseRepository courseRepository;
+    private final CourseAccess courseAccess;
 
-    public CourseCatalogService(CourseRepository courseRepository) {
+    public CourseCatalogService(CourseRepository courseRepository, CourseAccess courseAccess) {
         this.courseRepository = courseRepository;
+        this.courseAccess = courseAccess;
     }
 
     public List<CourseDto> listCourses() {
-        return courseRepository.listCourses().stream().map(this::toCourseDto).toList();
+        return courseRepository.listCourses().stream()
+                .filter(course -> !"class".equals(course.visibility()) || courseAccess.isReadable(course.id()))
+                .map(this::toCourseDto).toList();
     }
 
     public List<KnowledgePointDto> listKnowledgePoints(int courseId) {
@@ -84,9 +88,9 @@ public class CourseCatalogService {
                 return names;
             }
         }
-        return index.values().stream().skip(1).limit(2).toList().isEmpty()
-                ? List.of("核心知识点")
-                : index.values().stream().skip(1).limit(2).toList();
+        List<String> defaults = index.values().stream()
+                .skip(courseAccess.isClassCourse(courseId) ? 0 : 1).limit(2).toList();
+        return defaults.isEmpty() ? List.of("核心知识点") : defaults;
     }
 
     public String normalizeCourseTopic(int courseId) {
@@ -94,6 +98,15 @@ public class CourseCatalogService {
                 .findFirst()
                 .map(value -> value.toLowerCase(Locale.ROOT))
                 .orElse("topic");
+    }
+
+    public List<String> requireTopicNames(long courseId, List<Integer> pointIds) {
+        Map<Integer, String> topics = new LinkedHashMap<>();
+        courseRepository.listKnowledgePoints(courseId).forEach(point -> topics.put((int) point.id(), point.name()));
+        if (pointIds.stream().anyMatch(id -> !topics.containsKey(id))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "知识点不属于这门课程");
+        }
+        return pointIds.stream().distinct().map(topics::get).toList();
     }
 
     @Transactional
@@ -149,7 +162,7 @@ public class CourseCatalogService {
     }
 
     private CourseDto toCourseDto(CourseRepository.CourseRow row) {
-        return new CourseDto((int) row.id(), row.code(), row.name(), row.description());
+        return new CourseDto((int) row.id(), row.code(), row.name(), row.description(), row.visibility(), row.status());
     }
 
     private KnowledgePointDto toKnowledgePointDto(MutableKnowledgePoint node) {
@@ -176,7 +189,7 @@ public class CourseCatalogService {
         }
     }
 
-    public record CourseDto(int id, String code, String name, String description) {}
+    public record CourseDto(int id, String code, String name, String description, String visibility, String status) {}
 
     public record KnowledgePointDto(int id, String name, String difficulty, List<KnowledgePointDto> children) {
         public KnowledgePointDto {

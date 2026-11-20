@@ -8,8 +8,10 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import java.util.List;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -26,16 +28,19 @@ public class ClassController {
     private final ClassRepository classRepository;
     private final UserRepository userRepository;
     private final RoleGuard roleGuard;
+    private final CourseAccess courseAccess;
     private final ClassInsightService classInsightService;
 
     public ClassController(
             ClassRepository classRepository,
             UserRepository userRepository,
             RoleGuard roleGuard,
+            CourseAccess courseAccess,
             ClassInsightService classInsightService) {
         this.classRepository = classRepository;
         this.userRepository = userRepository;
         this.roleGuard = roleGuard;
+        this.courseAccess = courseAccess;
         this.classInsightService = classInsightService;
     }
 
@@ -50,10 +55,12 @@ public class ClassController {
     }
 
     @PostMapping
+    @Transactional
     @Operation(summary = "创建班级")
     public ApiResponse<ClassDetail> create(@Valid @RequestBody ClassCreateRequest request) {
         roleGuard.requireAny("teacher", "admin");
         if (request.courseId() != null) {
+            requireLegacyCourseBinding(request.courseId());
             roleGuard.requireCourseManager(request.courseId());
         }
         long ownerUserId = AuthContext.current() == null ? 0 : AuthContext.current().userId();
@@ -78,6 +85,7 @@ public class ClassController {
             @PathVariable long classId,
             @Valid @RequestBody ClassCourseRequest request) {
         requireClassOwnerOrAdmin(assertClassExists(classId));
+        requireLegacyCourseBinding(request.courseId());
         roleGuard.requireCourseManager(request.courseId());
         classRepository.addCourse(classId, request.courseId());
         return ApiResponse.success(detail(classId));
@@ -90,9 +98,12 @@ public class ClassController {
             @Valid @RequestBody ClassMemberRequest request) {
         requireClassOwnerOrAdmin(assertClassExists(classId));
         roleGuard.requireAny("teacher", "admin");
-        userRepository.findById(request.userId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "用户不存在: " + request.userId()));
-        classRepository.addMember(classId, request.userId(), request.normalizedRole());
+        String role = request.normalizedRole();
+        var target = request.userId() > 0 ? userRepository.findById(request.userId()) :
+                userRepository.findByUsername(request.username() == null ? "" : request.username().strip())
+                        .filter(user -> "active".equals(user.status()) && "student".equals(user.role()) && "student".equals(role));
+        long userId = target.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "找不到对应的班级成员账号")).id();
+        classRepository.addMember(classId, userId, role);
         return ApiResponse.success(classRepository.members(classId));
     }
 
@@ -133,11 +144,17 @@ public class ClassController {
         throw new ResponseStatusException(HttpStatus.FORBIDDEN, "只能管理自己负责的班级");
     }
 
-    public record ClassCreateRequest(@NotBlank String name, String description, Long courseId) {}
+    private void requireLegacyCourseBinding(long courseId) {
+        if (courseAccess.isClassCourse(courseId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "请通过教师课程工作台选择班级并发布课程");
+        }
+    }
+
+    public record ClassCreateRequest(@NotBlank @Size(max = 255) String name, String description, Long courseId) {}
 
     public record ClassCourseRequest(long courseId) {}
 
-    public record ClassMemberRequest(long userId, String role) {
+    public record ClassMemberRequest(long userId, String role, String username) {
         public String normalizedRole() {
             String normalized = role == null || role.isBlank() ? "student" : role.trim();
             if (!java.util.Set.of("student", "assistant").contains(normalized)) {

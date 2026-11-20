@@ -1,11 +1,14 @@
 package com.edupath.tutor;
 
+import com.edupath.auth.AuthContext;
 import com.edupath.common.JsonCodec;
+import com.edupath.course.CourseAccess;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -51,18 +54,25 @@ public class TutorRepository {
     }
 
     public List<SessionRow> sessions(String studentId, int page, int size) {
+        var viewer = AuthContext.current();
+        var scope = CourseAccess.readableCourses("tutor_sessions.course_id", viewer == null ? null : viewer.userId(),
+                viewer == null ? null : viewer.role());
+        List<Object> arguments = new ArrayList<>();
+        arguments.add(studentId);
+        scope.ifPresent(value -> arguments.addAll(value.arguments()));
+        arguments.add(size);
+        arguments.add((page - 1) * size);
         return jdbcTemplate.query(
                 """
                 SELECT session_id, student_id, course_id, title, created_at, updated_at
                 FROM tutor_sessions
                 WHERE student_id = ?
-                ORDER BY updated_at DESC
+                """ + scope.map(value -> " AND " + value.sql()).orElse("") + """
+                 ORDER BY updated_at DESC
                 LIMIT ? OFFSET ?
                 """,
                 this::mapSession,
-                studentId,
-                size,
-                (page - 1) * size);
+                arguments.toArray());
     }
 
     public Optional<SessionRow> findSession(String sessionId) {

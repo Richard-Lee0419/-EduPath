@@ -26,14 +26,17 @@ public class CourseController {
     private final CourseCatalogService courseCatalogService;
     private final RoleGuard roleGuard;
     private final UserRepository userRepository;
+    private final CourseAccess courseAccess;
 
     public CourseController(
             CourseCatalogService courseCatalogService,
             RoleGuard roleGuard,
-            UserRepository userRepository) {
+            UserRepository userRepository,
+            CourseAccess courseAccess) {
         this.courseCatalogService = courseCatalogService;
         this.roleGuard = roleGuard;
         this.userRepository = userRepository;
+        this.courseAccess = courseAccess;
     }
 
     @GetMapping
@@ -46,6 +49,7 @@ public class CourseController {
     @Operation(summary = "查询课程知识点树")
     public ApiResponse<List<CourseCatalogService.KnowledgePointDto>> listKnowledgePoints(
             @PathVariable int courseId) {
+        courseAccess.requireReadable(courseId);
         return ApiResponse.success(courseCatalogService.listKnowledgePoints(courseId));
     }
 
@@ -63,6 +67,9 @@ public class CourseController {
             @PathVariable long courseId,
             @RequestBody CourseCatalogService.CourseUpdateRequest request) {
         roleGuard.requireAdmin();
+        if (courseAccess.isClassCourse(courseId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "请在教师课程工作台修改或发布班级课程");
+        }
         return ApiResponse.success(courseCatalogService.updateCourse(courseId, request));
     }
 

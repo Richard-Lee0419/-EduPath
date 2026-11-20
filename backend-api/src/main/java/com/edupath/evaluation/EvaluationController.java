@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.Map;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -14,14 +15,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class EvaluationController {
 
     private final EvaluationService evaluationService;
-
     public EvaluationController(EvaluationService evaluationService) {
         this.evaluationService = evaluationService;
     }
 
     @GetMapping("/report")
     @Operation(summary = "查询学习评估报告")
-    public ApiResponse<Map<String, Object>> report() {
-        return ApiResponse.success(evaluationService.report());
+    public ApiResponse<Map<String, Object>> report(@RequestParam(name = "course_id", required = false) Integer courseId) {
+        return ApiResponse.success(evaluationService.report(courseId));
     }
 }

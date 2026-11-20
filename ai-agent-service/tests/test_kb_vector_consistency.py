@@ -296,7 +296,7 @@ def test_chroma_delete_is_scoped_to_target_document():
     assert not deleted & {"kb_12_1", "kb_13_1", "kb_110_1", "kb_11_9", "kb_11_8", "ai_chunk_1_131_abc_1"}
 
 
-def test_chroma_metadata_records_document_id_for_uploaded_chunks():
+def test_chroma_metadata_round_trips_document_id_and_physical_page_for_uploaded_chunks():
     from app.rag.chroma_vector_store import ChromaVectorStore
 
     collection = _FakeChromaCollection([])
@@ -304,6 +304,7 @@ def test_chroma_metadata_records_document_id_for_uploaded_chunks():
     uploaded = Chunker().chunk_uploaded_document(
         _source_document(title="uploaded.md", source="teacher-upload/uploaded.md"),
         document_id=21,
+        page=3,
     )
     builtin = Chunker().chunk_documents([_source_document(title="builtin.md", source="data-structures/builtin.md")])
 
@@ -311,10 +312,19 @@ def test_chroma_metadata_records_document_id_for_uploaded_chunks():
     assert all(chunk.document_id is None for chunk in builtin)
 
     store.upsert_chunks(uploaded)
-    assert collection.upserts[-1]["metadatas"][0]["document_id"] == 21
+    metadata = collection.upserts[-1]["metadatas"][0]
+    assert (metadata["document_id"], metadata["page"]) == (21, 3)
+    hit = ChromaVectorStore(collection=collection)._to_hits({
+        "ids": [[uploaded[0].chunk_id]],
+        "documents": [[uploaded[0].content]],
+        "metadatas": [[metadata]],
+        "distances": [[0.05]],
+    }, set())[0]
+    assert (hit.document_id, hit.page) == (21, 3)
 
     store.upsert_chunks(builtin)
     assert "document_id" not in collection.upserts[-1]["metadatas"][0]
+    assert "page" not in collection.upserts[-1]["metadatas"][0]
 
 
 def _ingest_via_api(client, *, document_id: int, course_id: int, filename: str, text: str) -> dict:

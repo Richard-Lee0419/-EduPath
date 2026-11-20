@@ -24,6 +24,8 @@ class SearchHit:
     document_type: str = "lecture"
     contains_examples: bool = False
     heading_path: tuple[str, ...] = ()
+    document_id: int | None = None
+    page: int | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,8 @@ class VectorStore:
         query: str,
         top_k: int = 5,
         knowledge_point_ids: list[int] | None = None,
+        *,
+        require_knowledge_points: bool = False,
     ) -> list[SearchHit]:
         query_embedding = self.embedding_client.embed(query)
         query_dense = self.embedding_client.embed_dense(query) if self._uses_dense_records() else None
@@ -65,12 +69,15 @@ class VectorStore:
             chunk = record.chunk
             if chunk.course_id != course_id:
                 continue
+            chunk_points = {chunk.knowledge_point_id, *chunk.related_knowledge_point_ids}
+            matches_points = bool(requested_points & chunk_points)
+            if require_knowledge_points and requested_points and not matches_points:
+                continue
             if query_dense is not None and record.dense_embedding is not None:
                 score = _dense_cosine(query_dense, record.dense_embedding)
             else:
                 score = cosine_similarity(query_embedding, record.embedding)
-            chunk_points = {chunk.knowledge_point_id, *chunk.related_knowledge_point_ids}
-            if requested_points and chunk_points & requested_points:
+            if matches_points:
                 score += 0.72
             if chunk.knowledge_point and chunk.knowledge_point in (query or ""):
                 score += 0.28
@@ -98,6 +105,8 @@ class VectorStore:
                     document_type=chunk.document_type,
                     contains_examples=chunk.contains_examples,
                     heading_path=chunk.heading_path,
+                    document_id=chunk.document_id,
+                    page=chunk.page,
                 )
             )
         hits.sort(key=lambda item: item.score, reverse=True)

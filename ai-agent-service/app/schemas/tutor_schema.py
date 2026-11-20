@@ -14,6 +14,7 @@ class TutorChatRequest(BaseModel):
     course_id: int = Field(default=1, ge=1)
     question: str = Field(min_length=2, max_length=2000)
     answer_mode: AnswerMode = "step_by_step"
+    local_only: bool = False
 
 
 class TutorCitation(BaseModel):

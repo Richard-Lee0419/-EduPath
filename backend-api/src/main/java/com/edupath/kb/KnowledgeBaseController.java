@@ -7,7 +7,13 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import org.springframework.http.CacheControl;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -41,10 +47,11 @@ public class KnowledgeBaseController {
     @PostMapping("/upload")
     @Operation(summary = "上传知识库文档并预留对象存储位置")
     public ApiResponse<KnowledgeBaseService.DocumentUploadResult> upload(
-            @RequestParam long courseId, @RequestPart MultipartFile file) throws IOException {
+            @RequestParam long courseId, @RequestParam(required = false) Long knowledgePointId,
+            @RequestPart MultipartFile file) throws IOException {
         roleGuard.requireCourseManager(courseId);
         return ApiResponse.success(
-                knowledgeBaseService.upload(courseId, file.getOriginalFilename(), file.getContentType(), file.getBytes()));
+                knowledgeBaseService.upload(courseId, file.getOriginalFilename(), file.getContentType(), file.getBytes(), knowledgePointId));
     }
 
     @PostMapping("/search")
@@ -69,6 +76,16 @@ public class KnowledgeBaseController {
         return ApiResponse.success(knowledgeBaseService.downloadUrl(documentId));
     }
 
+    @GetMapping("/documents/{documentId}/content")
+    public ResponseEntity<byte[]> content(@PathVariable long documentId) {
+        var pdf = knowledgeBaseService.openCoursePdf(documentId);
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF).cacheControl(CacheControl.noStore())
+                .header("X-Content-Type-Options", "nosniff")
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.inline()
+                        .filename(pdf.filename(), StandardCharsets.UTF_8).build().toString())
+                .body(pdf.content());
+    }
+
     @PatchMapping("/documents/{documentId}/status")
     @Operation(summary = "更新文档解析/索引状态")
     public ApiResponse<KnowledgeDocumentRepository.DocumentRow> updateStatus(
@@ -81,16 +98,18 @@ public class KnowledgeBaseController {
     @PostMapping("/documents/{documentId}/reindex")
     @Operation(summary = "重建文档索引任务")
     public ApiResponse<AgentTaskService.TaskCreatedResponse> reindex(@PathVariable long documentId) {
-        roleGuard.requireCourseManager(knowledgeBaseService.documentCourseId(documentId));
+        long courseId = knowledgeBaseService.documentCourseId(documentId);
+        roleGuard.requireCourseManager(courseId);
         var plans = List.of(
                 new AgentTaskService.AgentStepPlan("KnowledgeAgent", "正在读取文档元数据", "已读取文档元数据"),
                 new AgentTaskService.AgentStepPlan("KnowledgeAgent", "正在重建向量索引", "已重建向量索引"),
                 new AgentTaskService.AgentStepPlan("SafetyAgent", "正在检查索引结果", "索引检查通过"));
-        AgentTaskService.TaskCreatedResponse response = agentTaskService.createObservableWorkflowTask(
+        AgentTaskService.TaskCreatedResponse response = agentTaskService.createCourseWorkflowTask(
                 "kb_index",
                 plans,
                 "kb_reindex",
                 java.util.Map.of("document_id", documentId),
+                List.of(courseId),
                 progress -> {
                     progress.running("KnowledgeAgent", "正在读取文档对象和元数据", 12);
                     progress.success("KnowledgeAgent", "已读取文档对象和元数据", 24);

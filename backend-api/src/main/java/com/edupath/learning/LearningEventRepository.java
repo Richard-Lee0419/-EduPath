@@ -1,11 +1,14 @@
 package com.edupath.learning;
 
+import com.edupath.auth.AuthContext;
 import com.edupath.common.JsonCodec;
+import com.edupath.course.CourseAccess;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.springframework.dao.DuplicateKeyException;
@@ -126,6 +129,14 @@ public class LearningEventRepository {
     }
 
     public List<LearningEventRow> events(String studentId, int page, int size) {
+        var viewer = AuthContext.current();
+        var scope = CourseAccess.readableCourses("learning_events.course_id", viewer == null ? null : viewer.userId(),
+                viewer == null ? null : viewer.role());
+        List<Object> arguments = new ArrayList<>();
+        arguments.add(studentId);
+        scope.ifPresent(value -> arguments.addAll(value.arguments()));
+        arguments.add(size);
+        arguments.add((page - 1) * size);
         return jdbcTemplate.query(
                 """
                 SELECT event_id, event_type, course_id, knowledge_point, source_type, source_id,
@@ -133,13 +144,22 @@ public class LearningEventRepository {
                        metadata, occurred_at
                 FROM learning_events
                 WHERE student_id = ?
-                ORDER BY occurred_at DESC, id DESC
+                """ + scope.map(value -> " AND " + value.sql()).orElse("") + """
+                 ORDER BY occurred_at DESC, id DESC
                 LIMIT ? OFFSET ?
                 """,
                 this::mapEvent,
-                studentId,
-                size,
-                (page - 1) * size);
+                arguments.toArray());
+    }
+
+    LearningEventService.MasteryUpdate classMastery(String studentId, int courseId, String point,
+                                                     String eventType, int previousScore) {
+        return jdbcTemplate.query("""
+                SELECT mastery_score, attempts, behavior_weight FROM class_course_mastery
+                WHERE student_id = ? AND course_id = ? AND knowledge_point = ?
+                """, (rs, row) -> new LearningEventService.MasteryUpdate(point, previousScore, rs.getInt("mastery_score"),
+                rs.getInt("attempts"), rs.getInt("behavior_weight"), eventType), studentId, courseId, point)
+                .stream().findFirst().orElse(new LearningEventService.MasteryUpdate(point, 0, 0, 0, 0, eventType));
     }
 
     public List<Integer> completedPathDays(String studentId, String pathId) {

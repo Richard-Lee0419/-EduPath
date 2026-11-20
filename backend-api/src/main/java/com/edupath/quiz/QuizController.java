@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -41,11 +42,12 @@ public class QuizController {
                 new AgentTaskService.AgentStepPlan("KnowledgeAgent", "正在检索课程证据", "已检索课程证据"),
                 new AgentTaskService.AgentStepPlan("QuizAgent", "正在生成 3 题以内小测", "已生成结构化小测"),
                 new AgentTaskService.AgentStepPlan("SafetyAgent", "正在逐题核对答案与证据", "SafetyAgent 审查通过"));
-        return ApiResponse.success(agentTaskService.createObservableWorkflowTask(
+        return ApiResponse.success(agentTaskService.createCourseWorkflowTask(
                 "quiz",
                 plans,
                 "quiz_generate",
                 request,
+                List.of(request.courseId() == null ? 1L : request.courseId().longValue()),
                 progress -> {
                     progress.running("KnowledgeAgent", "正在调用 AI 服务检索课程证据", 16);
                     Object result = quizService.generate(request);
@@ -64,18 +66,24 @@ public class QuizController {
         if (request == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "quiz_id 和 answers 不能为空");
         }
+        int courseId = quizService.accessibleQuizCourse(request.quizId());
+        boolean classCourse = quizService.isClassCourse(courseId);
+        String masteryAgent = classCourse ? "CourseMastery" : "ProfileAgent";
+        String masteryCompleted = classCourse ? "已记录班级课程掌握度" : "已创建画像新版本";
         List<AgentTaskService.AgentStepPlan> plans = List.of(
                 new AgentTaskService.AgentStepPlan("ScoringEngine", "正在执行确定性评分", "已完成确定性评分"),
                 new AgentTaskService.AgentStepPlan("KnowledgeAgent", "正在检索错题知识证据", "已检索错题知识证据"),
                 new AgentTaskService.AgentStepPlan("EvaluationAgent", "正在生成结构化评估", "已生成结构化评估"),
                 new AgentTaskService.AgentStepPlan("SafetyAgent", "正在核对评估与真实答题结果", "SafetyAgent 审查通过"),
-                new AgentTaskService.AgentStepPlan("ProfileAgent", "正在回写学习画像", "已创建画像新版本"),
+                new AgentTaskService.AgentStepPlan(masteryAgent,
+                        classCourse ? "正在记录课程测验结果" : "正在回写学习画像", masteryCompleted),
                 new AgentTaskService.AgentStepPlan("PathAgent", "正在重规划未来三天", "已创建学习路径新版本"));
-        return ApiResponse.success(agentTaskService.createObservableWorkflowTask(
+        return ApiResponse.success(agentTaskService.createCourseWorkflowTask(
                 "evaluation",
                 plans,
                 "quiz_submit",
                 request,
+                List.of((long) courseId),
                 progress -> {
                     progress.running("ScoringEngine", "正在执行确定性评分", 12);
                     progress.success("ScoringEngine", "已完成确定性评分", 24);
@@ -84,7 +92,7 @@ public class QuizController {
                     progress.success("KnowledgeAgent", "已检索错题知识证据", 48);
                     progress.success("EvaluationAgent", "已生成结构化评估", 72);
                     progress.success("SafetyAgent", "SafetyAgent 审查通过", 88);
-                    progress.success("ProfileAgent", "已创建画像新版本", 92);
+                    progress.success(masteryAgent, masteryCompleted, 92);
                     progress.success("PathAgent", "已重规划未来三天并通过路径复核", 96);
                     return result;
                 }));
@@ -94,8 +102,9 @@ public class QuizController {
     @Operation(summary = "查询当前学生测验历史")
     public ApiResponse<QuizService.QuizHistoryResponse> history(
             @org.springframework.web.bind.annotation.RequestParam(defaultValue = "1") int page,
-            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "20") int size) {
-        return ApiResponse.success(quizService.history(page, size));
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "20") int size,
+            @RequestParam(name = "course_id", required = false) Integer courseId) {
+        return ApiResponse.success(quizService.history(page, size, courseId));
     }
 
     @GetMapping("/wrong-book")
@@ -108,8 +117,8 @@ public class QuizController {
 
     @GetMapping("/mastery")
     @Operation(summary = "查询当前学生知识点掌握度")
-    public ApiResponse<QuizService.MasteryResponse> mastery() {
-        return ApiResponse.success(quizService.mastery());
+    public ApiResponse<QuizService.MasteryResponse> mastery(@RequestParam(name = "course_id", required = false) Integer courseId) {
+        return ApiResponse.success(quizService.mastery(courseId));
     }
 
     @GetMapping("/questions")

@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api import evaluation_api, kb_api, path_api, profile_api, quiz_api, resource_api, task_api, tutor_api
+from app.api import personal_pdf_api
 from app.core.config import settings
 from app.rag.retriever import retriever
 
@@ -60,6 +61,7 @@ def readiness() -> dict[str, object]:
 app.include_router(profile_api.router)
 app.include_router(resource_api.router)
 app.include_router(tutor_api.router)
+app.include_router(personal_pdf_api.router)
 app.include_router(path_api.router)
 app.include_router(quiz_api.router)
 app.include_router(evaluation_api.router)

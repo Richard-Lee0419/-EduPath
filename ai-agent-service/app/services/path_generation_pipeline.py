@@ -60,13 +60,7 @@ class PathGenerationPipeline:
             for part in [request.target or "掌握核心知识点", " ".join(personalization.weak_points)]
             if part
         )
-        evidence = _deduplicate_evidence(
-            [
-                item
-                for course_id in course_ids
-                for item in self.knowledge_agent.retrieve(course_id, query, top_k=2)
-            ]
-        )
+        evidence = self._retrieve_course_evidence(course_ids, query, request.local_only)
         if not evidence:
             raise LLMGatewayError("KnowledgeAgent returned no evidence for learning path")
 
@@ -85,7 +79,7 @@ class PathGenerationPipeline:
             baseline, request, evidence, self.safety_agent
         )
         generation_mode = "deterministic_fallback"
-        if self.llm_gateway.is_configured:
+        if self.llm_gateway.is_configured and not request.local_only:
             try:
                 path = self._generate_with_model(
                     request, safe_profile, personalization, baseline, evidence, calls
@@ -177,13 +171,7 @@ class PathGenerationPipeline:
             request.daily_minutes,
         )
         query = " ".join([*safe_profile["weak_points"], *trigger_terms, request.target])
-        evidence = _deduplicate_evidence(
-            [
-                item
-                for course_id in request.course_ids
-                for item in self.knowledge_agent.retrieve(course_id, query, top_k=2)
-            ]
-        )
+        evidence = self._retrieve_course_evidence(request.course_ids, query, request.local_only)
         if not evidence:
             raise LLMGatewayError("KnowledgeAgent returned no evidence for path replanning")
 
@@ -193,6 +181,7 @@ class PathGenerationPipeline:
             days=request.days,
             daily_minutes=request.daily_minutes,
             student_profile=safe_profile,
+            local_only=request.local_only,
         )
         baseline = LearningPathPlan.model_validate(
             self.path_agent.generate(
@@ -219,7 +208,7 @@ class PathGenerationPipeline:
             ),
         }
         safety = self.safety_agent.review(_path_review_text(path), evidence)
-        if self.llm_gateway.is_configured:
+        if self.llm_gateway.is_configured and not request.local_only:
             try:
                 path = self._replan_with_model(
                     request, safe_profile, personalization, baseline, evidence, calls
@@ -481,6 +470,12 @@ class PathGenerationPipeline:
                     ) from exception
                 validation_error = str(exception)[:500]
         raise LLMGatewayError("PathAgent safety revision failed")
+
+    def _retrieve_course_evidence(self, course_ids: list[int], query: str, local_only: bool) -> list[RagEvidence]:
+        evidence_by_course = [self.knowledge_agent.retrieve(course_id, query, top_k=2) for course_id in course_ids]
+        if local_only and not all(evidence_by_course):
+            return []
+        return _deduplicate_evidence([item for course in evidence_by_course for item in course])
 
     def _review(
         self,
@@ -790,6 +785,8 @@ def _resource_evidence(item: RagEvidence) -> ResourceEvidence:
         content=item.content,
         score=item.score,
         source=item.source,
+        document_id=item.document_id,
+        page=item.page,
     )
 
 

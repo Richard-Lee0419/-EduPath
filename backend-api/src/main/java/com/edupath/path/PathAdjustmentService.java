@@ -45,7 +45,13 @@ public class PathAdjustmentService {
 
     public Map<String, Object> evaluate(
             LearningPathRepository.PathVersion pathVersion, List<Integer> completedDays) {
-        PathAdjustmentRepository.BehaviorMetrics metrics = repository.metrics(pathVersion.studentId());
+        return evaluate(pathVersion, completedDays, List.of());
+    }
+
+    Map<String, Object> evaluate(LearningPathRepository.PathVersion pathVersion, List<Integer> completedDays,
+                                 List<Integer> classCourses) {
+        PathAdjustmentRepository.BehaviorMetrics metrics = classCourses.isEmpty() ? repository.metrics(pathVersion.studentId())
+                : repository.metrics(pathVersion.studentId(), classCourses);
         OffsetDateTime now = now();
         long pathAgeHours = nonNegativeHours(pathVersion.createdAt(), now);
         OffsetDateTime activityBaseline = metrics.lastActivityAt() == null

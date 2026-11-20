@@ -5,6 +5,7 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -19,7 +20,7 @@ public class CourseRepository {
     public List<CourseRow> listCourses() {
         return jdbcTemplate.query(
                 """
-                SELECT id, code, name, description, status
+                SELECT id, code, name, description, status, visibility
                 FROM courses
                 WHERE status <> 'deleted'
                 ORDER BY id ASC
@@ -31,7 +32,7 @@ public class CourseRepository {
         return jdbcTemplate
                 .query(
                         """
-                        SELECT id, code, name, description, status
+                        SELECT id, code, name, description, status, visibility
                         FROM courses
                         WHERE id = ? AND status <> 'deleted'
                         """,
@@ -42,17 +43,32 @@ public class CourseRepository {
     }
 
     public long createCourse(String code, String name, String description, long createdBy) {
-        jdbcTemplate.update(
-                """
-                INSERT INTO courses (code, name, description, status, created_by, created_at, updated_at)
-                VALUES (?, ?, ?, 'active', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """,
-                code,
-                name,
-                description,
-                createdBy);
-        Long id = jdbcTemplate.queryForObject("SELECT MAX(id) FROM courses", Long.class);
-        return id == null ? 0 : id;
+        return createCourse(code, name, description, createdBy, "public", "active");
+    }
+
+    long createCourse(String code, String name, String description, long createdBy, String visibility, String status) {
+        GeneratedKeyHolder key = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            var statement = connection.prepareStatement("""
+                    INSERT INTO courses (code, name, description, created_by, visibility, status)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """, new String[] {"id"});
+            statement.setString(1, code);
+            statement.setString(2, name);
+            statement.setString(3, description);
+            statement.setLong(4, createdBy);
+            statement.setString(5, visibility);
+            statement.setString(6, status);
+            return statement;
+        }, key);
+        return key.getKey().longValue();
+    }
+
+    public Optional<CourseRow> lockClassCourse(long id) {
+        return jdbcTemplate.query("""
+                SELECT id, code, name, description, status, visibility FROM courses
+                WHERE id = ? AND visibility = 'class' AND status <> 'deleted' FOR UPDATE
+                """, this::mapCourse, id).stream().findFirst();
     }
 
     public int updateCourse(long courseId, String name, String description, String status) {
@@ -89,18 +105,24 @@ public class CourseRepository {
             String name,
             String difficulty,
             int sortOrder) {
-        jdbcTemplate.update(
-                """
-                INSERT INTO knowledge_points (course_id, parent_id, name, difficulty, sort_order, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """,
-                courseId,
-                parentId,
-                name,
-                difficulty,
-                sortOrder);
-        Long id = jdbcTemplate.queryForObject("SELECT MAX(id) FROM knowledge_points", Long.class);
-        return id == null ? 0 : id;
+        GeneratedKeyHolder key = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            var statement = connection.prepareStatement("""
+                    INSERT INTO knowledge_points (course_id, parent_id, name, difficulty, sort_order)
+                    VALUES (?, ?, ?, ?, ?)
+                    """, new String[] {"id"});
+            statement.setLong(1, courseId);
+            statement.setObject(2, parentId);
+            statement.setString(3, name);
+            statement.setString(4, difficulty);
+            statement.setInt(5, sortOrder);
+            return statement;
+        }, key);
+        return key.getKey().longValue();
+    }
+
+    void orderKnowledgePoint(long id, int sortOrder) {
+        jdbcTemplate.update("UPDATE knowledge_points SET sort_order = ? WHERE id = ?", sortOrder, id);
     }
 
     public int updateKnowledgePoint(long id, String name, String difficulty, String status) {
@@ -125,7 +147,8 @@ public class CourseRepository {
                 rs.getString("code"),
                 rs.getString("name"),
                 rs.getString("description"),
-                rs.getString("status"));
+                rs.getString("status"),
+                rs.getString("visibility"));
     }
 
     private KnowledgePointRow mapPoint(ResultSet rs, int rowNum) throws SQLException {
@@ -140,7 +163,7 @@ public class CourseRepository {
                 rs.getString("status"));
     }
 
-    public record CourseRow(long id, String code, String name, String description, String status) {}
+    public record CourseRow(long id, String code, String name, String description, String status, String visibility) {}
 
     public record KnowledgePointRow(
             long id,

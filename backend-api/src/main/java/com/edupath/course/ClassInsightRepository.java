@@ -16,15 +16,15 @@ public class ClassInsightRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public List<StudentInsightRow> students(long classId, long courseId, OffsetDateTime since) {
+    public List<StudentInsightRow> students(long classId, long courseId, OffsetDateTime since, boolean classCourse) {
         return jdbcTemplate.query(
                 """
                 SELECT u.id AS user_id, u.username,
-                       (SELECT COUNT(*) FROM knowledge_mastery km
-                        JOIN knowledge_points kp ON kp.course_id = ? AND kp.name = km.knowledge_point
+                       (SELECT COUNT(*) FROM %1$s km
+                        JOIN knowledge_points kp ON kp.course_id = ? AND kp.name = km.knowledge_point %2$s
                         WHERE km.student_id = u.username) AS mastery_points,
-                       (SELECT AVG(km.mastery_score) FROM knowledge_mastery km
-                        JOIN knowledge_points kp ON kp.course_id = ? AND kp.name = km.knowledge_point
+                       (SELECT AVG(km.mastery_score) FROM %1$s km
+                        JOIN knowledge_points kp ON kp.course_id = ? AND kp.name = km.knowledge_point %2$s
                         WHERE km.student_id = u.username) AS average_mastery,
                        (SELECT COUNT(*) FROM learning_events le
                         WHERE le.user_id = u.id AND le.course_id = ? AND le.occurred_at >= ?) AS activity_count,
@@ -40,7 +40,7 @@ public class ClassInsightRepository {
                 JOIN users u ON u.id = cm.user_id
                 WHERE cm.class_id = ? AND cm.role = 'student' AND cm.status = 'active' AND u.status = 'active'
                 ORDER BY u.username ASC
-                """,
+                """.formatted(masterySource(classCourse), masteryCourseScope(classCourse)),
                 (rs, rowNum) -> new StudentInsightRow(
                         rs.getLong("user_id"),
                         rs.getString("username"),
@@ -62,22 +62,22 @@ public class ClassInsightRepository {
                 classId);
     }
 
-    public List<WeakKnowledgeRow> weakKnowledgePoints(long classId, long courseId) {
+    public List<WeakKnowledgeRow> weakKnowledgePoints(long classId, long courseId, boolean classCourse) {
         return jdbcTemplate.query(
                 """
                 SELECT kp.name AS knowledge_point, COUNT(DISTINCT km.student_id) AS student_count,
                        AVG(km.mastery_score) AS average_mastery,
                        SUM(CASE WHEN km.mastery_score < 60 THEN 1 ELSE 0 END) AS at_risk_students,
                        SUM(km.attempts) AS attempts
-                FROM knowledge_mastery km
-                JOIN knowledge_points kp ON kp.course_id = ? AND kp.name = km.knowledge_point
+                FROM %s km
+                JOIN knowledge_points kp ON kp.course_id = ? AND kp.name = km.knowledge_point %s
                 JOIN users u ON u.username = km.student_id
                 JOIN class_members cm ON cm.user_id = u.id AND cm.class_id = ?
                     AND cm.role = 'student' AND cm.status = 'active'
                 GROUP BY kp.name
                 ORDER BY average_mastery ASC, at_risk_students DESC, student_count DESC
                 LIMIT 8
-                """,
+                """.formatted(masterySource(classCourse), masteryCourseScope(classCourse)),
                 (rs, rowNum) -> new WeakKnowledgeRow(
                         rs.getString("knowledge_point"),
                         rs.getInt("student_count"),
@@ -86,6 +86,14 @@ public class ClassInsightRepository {
                         rs.getInt("attempts")),
                 courseId,
                 classId);
+    }
+
+    private static String masterySource(boolean classCourse) {
+        return classCourse ? "class_course_mastery" : "knowledge_mastery";
+    }
+
+    private static String masteryCourseScope(boolean classCourse) {
+        return classCourse ? "AND km.course_id = kp.course_id AND kp.status = 'active'" : "";
     }
 
     public List<ActivityTrendRow> activityTrend(

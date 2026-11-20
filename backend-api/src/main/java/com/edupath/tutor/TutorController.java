@@ -32,6 +32,7 @@ public class TutorController {
         if (request == null || request.normalizedQuestion().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "question 或 message 不能为空");
         }
+        tutorService.validateChatAccess(request);
         List<AgentTaskService.AgentStepPlan> plans = List.of(
                 new AgentTaskService.AgentStepPlan(
                         "KnowledgeAgent", "正在检索课程证据", "已检索相关证据"),
@@ -39,11 +40,12 @@ public class TutorController {
                         "TutorAgent", "正在依据证据生成回答", "已生成结构化辅导回答"),
                 new AgentTaskService.AgentStepPlan(
                         "SafetyAgent", "正在检查回答是否引用证据并避免误导", "SafetyAgent 审查通过"));
-        return ApiResponse.success(agentTaskService.createObservableWorkflowTask(
+        return ApiResponse.success(agentTaskService.createCourseWorkflowTask(
                 "tutor",
                 plans,
                 "tutor_chat",
                 request,
+                List.of(request.courseId() == null ? 1L : request.courseId().longValue()),
                 progress -> {
                     progress.running("KnowledgeAgent", "正在调用 AI 服务检索课程证据", 18);
                     progress.success("KnowledgeAgent", "已检索课程证据", 38);

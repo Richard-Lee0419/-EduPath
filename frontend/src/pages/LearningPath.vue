@@ -6,11 +6,12 @@ import {
   getCurrentLearningPath,
   startBehaviorPathReplan,
 } from '../api/learningPath';
+import { getCourses, learningCourses, requestedCourseId } from '../api/course';
 import { waitForAgentTask } from '../api/task';
 import SplitText from '../components/SplitText.vue';
 import { shouldEmitExposure, track } from '../research';
 import type { LearningPath as LearningPathData, PageKey } from '../types';
-import type { ModelRuntime, ResourceSafety } from '../types/api';
+import type { Course, ModelRuntime, ResourceSafety } from '../types/api';
 
 defineEmits<{
   navigate: [page: PageKey];
@@ -46,6 +47,12 @@ const completingDay = ref<number | null>(null);
 const behaviorReplanning = ref(false);
 const learningFeedback = ref('');
 const deferredDay = ref<number | null>(null);
+const courses = ref<Course[]>([]);
+const selectedCourseId = ref<number | null>(requestedCourseId());
+const selectedCourse = computed(() => courses.value.find((course) => course.id === selectedCourseId.value));
+const classCourses = computed(() => courses.value.filter((course) => course.visibility === 'class'));
+const defaultCourseIds = computed(() => courses.value.filter((course) => course.visibility !== 'class').map((course) => course.id));
+const courseControlsDisabled = computed(() => loading.value || generating.value || behaviorReplanning.value || completingDay.value !== null);
 
 const pathNodes = computed<PathNode[]>(() => {
   const plan = learningPath.value?.dailyPlan ?? [];
@@ -103,9 +110,8 @@ const modelRuntimeSummary = computed(() => {
 });
 
 const loadPath = async () => {
-  const result = await getCurrentLearningPath();
+  const result = await getCurrentLearningPath(selectedCourseId.value ?? undefined);
   learningPath.value = result.learningPath;
-  loading.value = false;
   const pathId = `path:${result.learningPath?.target ?? 'unknown'}`;
   if (result.learningPath?.adjustmentStrategy && shouldEmitExposure(`path_change_shown:${pathId}`)) {
     track('path_change_shown', {
@@ -119,6 +125,27 @@ const loadPath = async () => {
   }
 };
 
+async function changeCourse() {
+  loading.value = true;
+  learningPath.value = null;
+  errorMessage.value = '';
+  modelRuntime.value = null;
+  safetyReview.value = null;
+  activeTaskId.value = '';
+  deferredDay.value = null;
+  learningFeedback.value = '';
+  try {
+    if (selectedCourseId.value && !selectedCourse.value) {
+      throw new Error('课程不存在或当前账号没有访问权限。');
+    }
+    await loadPath();
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '学习路径读取失败';
+  } finally {
+    loading.value = false;
+  }
+}
+
 const regeneratePath = async () => {
   generating.value = true;
   errorMessage.value = '';
@@ -126,8 +153,8 @@ const regeneratePath = async () => {
   generationProgress.value = 3;
   try {
     const result = await generateLearningPath({
-      courseIds: [1, 2],
-      target: learningPath.value?.target || '生成学习路径',
+      courseIds: selectedCourse.value ? [selectedCourse.value.id] : defaultCourseIds.value,
+      target: learningPath.value?.target || (selectedCourse.value ? `学习${selectedCourse.value.name}` : '生成学习路径'),
       days: 7,
       dailyMinutes: learningPath.value?.dailyMinutes || 40,
     });
@@ -161,7 +188,7 @@ const completeNode = async (day: number) => {
   learningFeedback.value = '';
   errorMessage.value = '';
   try {
-    const result = await completeLearningPathDay(day);
+    const result = await completeLearningPathDay(day, selectedCourseId.value ?? undefined);
     const mastery = result.learning_update.mastery_updates[0];
     learningFeedback.value = mastery
       ? `第 ${day} 天已完成，${mastery.knowledge_point} 掌握度 ${mastery.previous_score}% → ${mastery.mastery_score}%`
@@ -180,7 +207,7 @@ const runBehaviorReplan = async () => {
   errorMessage.value = '';
   learningFeedback.value = '';
   try {
-    const created = await startBehaviorPathReplan();
+    const created = await startBehaviorPathReplan(selectedCourseId.value ?? undefined);
     activeTaskId.value = created.taskId;
     const completedTask = await waitForAgentTask(created.taskId, (task) => {
       generationProgress.value = task.progress;
@@ -210,7 +237,13 @@ const skipNode = (day: number) => {
 };
 
 onMounted(async () => {
-  await loadPath();
+  try {
+    courses.value = learningCourses(await getCourses());
+    await changeCourse();
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '课程目录加载失败';
+    loading.value = false;
+  }
 });
 </script>
 
@@ -219,10 +252,17 @@ onMounted(async () => {
     <section class="path-hero">
       <div>
         <SplitText tag="h1" text="个性化学习路径" />
-        <p>该路径根据画像、练习结果和薄弱点动态生成。</p>
+        <p>{{ selectedCourse?.visibility === 'class' ? '根据本课程资料和学习记录制定路径。' : '该路径根据画像、练习结果和薄弱点动态生成。' }}</p>
+        <label v-if="classCourses.length || selectedCourseId" class="path-course-select">
+          课程
+          <select v-model.number="selectedCourseId" :disabled="courseControlsDisabled" @change="changeCourse">
+            <option :value="null">平台课程综合路径</option>
+            <option v-for="course in classCourses" :key="course.id" :value="course.id">{{ course.name }}</option>
+          </select>
+        </label>
         <small class="path-version">{{ pathVersionSummary }}</small>
       </div>
-      <button class="secondary-pill hover-scale" type="button" :disabled="generating" @click="regeneratePath">
+      <button class="secondary-pill hover-scale" type="button" :disabled="courseControlsDisabled || (selectedCourseId !== null && !selectedCourse) || (!selectedCourseId && !defaultCourseIds.length)" @click="regeneratePath">
         {{ generating ? `生成中 ${generationProgress}%` : '重新生成路径' }}
       </button>
     </section>
@@ -331,6 +371,7 @@ onMounted(async () => {
           <span>下一阶段测试</span>
           <strong>{{ nextTestName }}</strong>
           <p>预计 3 个学习阶段后到达。</p>
+          <a v-if="selectedCourse?.visibility === 'class'" :href="`/quiz?course=${selectedCourse.id}`">进入本课程测验</a>
         </article>
 
         <article class="recent-adjust-card interactive-card">
@@ -345,7 +386,8 @@ onMounted(async () => {
           <div class="adjust-row">
             <span>当前重点</span>
             <strong>{{ focusPoint }}</strong>
-            <button type="button" @click="$emit('navigate', 'evaluation')">+</button>
+            <a v-if="selectedCourseId" :href="`/evaluation?course=${selectedCourseId}`">查看评估</a>
+            <button v-else type="button" @click="$emit('navigate', 'evaluation')">+</button>
           </div>
         </article>
       </aside>
@@ -354,6 +396,8 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.path-course-select { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.path-course-select select { max-width: 100%; }
 .path-redesign {
   min-height: calc(100vh - 72px);
   overflow-x: hidden;

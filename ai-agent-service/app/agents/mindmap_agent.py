@@ -101,6 +101,9 @@ def _mermaid_label(value: str) -> str:
 
 def _classic_visual(topic: str, evidence: list[RagEvidence]) -> str:
     """Return an evidence-linked teaching diagram for classic data-structure topics."""
+
+    if any(item.page is not None for item in evidence):
+        return ""
     searchable = " ".join(
         [topic]
         + [item.knowledge_point for item in evidence]

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { getCurrentProfile } from '../api/profile';
-import { getCourses } from '../api/course';
+import { getCourses, getKnowledgePoints, learningCourses, requestedCourseId } from '../api/course';
 import { generateQuiz, submitQuiz, type QuizQuestion, type QuizSubmitResult } from '../api/quiz';
+import CoursePdfPreview from '../components/CoursePdfPreview.vue';
 import type { Profile } from '../types';
-import type { ModelRuntime, ResourceEvidence, ResourceSafety } from '../types/api';
+import type { Course, KnowledgePoint, ModelRuntime, ResourceEvidence, ResourceSafety } from '../types/api';
 
 const quizId = ref<number | null>(null);
 const quizTitle = ref('');
@@ -14,8 +15,13 @@ const profile = ref<Profile | null>(null);
 const loading = ref(true);
 const submitting = ref(false);
 const errorMessage = ref('');
-const courses = ref<Array<{ id: number; name: string }>>([]);
+const courses = ref<Course[]>([]);
 const selectedCourseId = ref<number | null>(null);
+const requested = requestedCourseId();
+const classCourse = computed(() => courses.value.find((course) => course.id === selectedCourseId.value)?.visibility === 'class');
+const courseTopics = ref<KnowledgePoint[]>([]);
+const selectedTopicId = ref(0);
+const preview = ref<InstanceType<typeof CoursePdfPreview> | null>(null);
 const activeTaskId = ref('');
 const taskProgress = ref(0);
 const modelRuntime = ref<ModelRuntime | null>(null);
@@ -24,12 +30,14 @@ const evidence = ref<ResourceEvidence[]>([]);
 const submitResult = ref<QuizSubmitResult | null>(null);
 
 const targetKnowledgePoints = computed(() => {
+  if (classCourse.value) return [];
   const points = profile.value?.weakPoints.filter(Boolean) ?? [];
   return points.slice(0, 3);
 });
 
 const generationSource = computed(() =>
-  profile.value && targetKnowledgePoints.value.length
+  classCourse.value ? '基于本班课程的 PDF 讲义生成测验题'
+    : profile.value && targetKnowledgePoints.value.length
     ? `基于当前学习画像薄弱点：${targetKnowledgePoints.value.join('、')}`
     : '未发现画像薄弱点，按当前课程知识库生成基础诊断题',
 );
@@ -53,18 +61,27 @@ const loadQuiz = async () => {
   modelRuntime.value = null;
   safetyReview.value = null;
   evidence.value = [];
+  questions.value = [];
+  quizId.value = null;
   try {
-    const [profileResult, courseRows] = await Promise.all([getCurrentProfile(), getCourses()]);
-    profile.value = profileResult.profile;
-    courses.value = courseRows.map((item) => ({ id: item.id, name: item.name }));
+    const [profileResult, courseRows] = await Promise.all([getCurrentProfile().catch(() => null), getCourses()]);
+    profile.value = profileResult?.profile ?? null;
+    courses.value = learningCourses(courseRows);
     if (!selectedCourseId.value) {
-      const preferred = courseRows.find((item) => profile.value?.targetCourses.includes(item.name));
-      selectedCourseId.value = preferred?.id ?? courseRows[0]?.id ?? null;
+      const preferred = courses.value.find((item) => profile.value?.targetCourses.includes(item.name));
+      selectedCourseId.value = requested ?? preferred?.id ?? courses.value[0]?.id ?? null;
     }
     if (!selectedCourseId.value) throw new Error('没有可用于生成小测的课程');
+    if (!courses.value.some((item) => item.id === selectedCourseId.value)) {
+      selectedCourseId.value = null;
+      throw new Error('课程不存在或当前账号没有访问权限。');
+    }
+    courseTopics.value = classCourse.value ? await getKnowledgePoints(selectedCourseId.value) : [];
+    if (!courseTopics.value.some((topic) => topic.id === selectedTopicId.value)) selectedTopicId.value = 0;
     const quiz = await generateQuiz(
       {
         courseId: selectedCourseId.value,
+        knowledgePointIds: selectedTopicId.value ? [selectedTopicId.value] : [],
         knowledgePoints: targetKnowledgePoints.value,
         difficulty: 'basic',
         questionCount: 3,
@@ -137,8 +154,13 @@ onMounted(loadQuiz);
         <p>{{ generationSource }}</p>
       </div>
       <div class="quiz-hero__actions">
-        <select v-model="selectedCourseId" :disabled="loading || submitting" @change="loadQuiz">
+        <select v-model="selectedCourseId" aria-label="选择测验课程" :disabled="loading || submitting" @change="loadQuiz">
+          <option v-if="!selectedCourseId" :value="null" disabled>选择课程</option>
           <option v-for="course in courses" :key="course.id" :value="course.id">{{ course.name }}</option>
+        </select>
+        <select v-if="classCourse && courseTopics.length" v-model.number="selectedTopicId" aria-label="选择测验知识点" :disabled="loading || submitting" @change="loadQuiz">
+          <option :value="0">整门课程</option>
+          <option v-for="topic in courseTopics" :key="topic.id" :value="topic.id">{{ topic.name }}</option>
         </select>
         <button class="secondary-action hover-scale" type="button" :disabled="loading || submitting" @click="loadQuiz">
           {{ loading ? `生成中 ${taskProgress}%` : '重新生成 3 题' }}
@@ -194,7 +216,7 @@ onMounted(loadQuiz);
       <footer class="quiz-submit interactive-card">
         <div>
           <strong>已完成 {{ completedAnswers }} / {{ questions.length }}</strong>
-          <p>提交后由后端确定性判分，再经 EvaluationAgent、ProfileAgent 和 PathAgent 自动重规划未来三天。</p>
+          <p>{{ classCourse ? '提交后按题目判分并更新本课程的学习记录。' : '提交后由后端确定性判分，再经 EvaluationAgent、ProfileAgent 和 PathAgent 自动重规划未来三天。' }}</p>
         </div>
         <button class="primary-action hover-scale" type="button" :disabled="submitting" @click="submitCurrentQuiz">
           {{ submitting ? `评估中 ${taskProgress}%` : '提交并生成评估' }}
@@ -208,7 +230,8 @@ onMounted(loadQuiz);
         </div>
         <div class="evaluation-copy">
           <span>EvaluationAgent 结论</span>
-          <h2>{{ submitResult.evaluation.summary || '评估与画像已更新' }}</h2>
+          <h2>{{ submitResult.evaluation.summary || (classCourse ? '课程评估已更新' : '评估与画像已更新') }}</h2>
+          <a v-if="classCourse" :href="`/evaluation?course=${selectedCourseId}`">查看课程评估</a>
           <p v-if="submitResult.evaluation.weakPoints.length">
             薄弱点：{{ submitResult.evaluation.weakPoints.join('、') }}
           </p>
@@ -243,10 +266,12 @@ onMounted(loadQuiz);
           <li v-for="item in evidence.slice(0, 3)" :key="item.chunk_id || item.title">
             <strong>{{ item.title || item.chunk_id }}</strong>
             <small>{{ item.source || item.chunk_id }}</small>
+            <button v-if="item.document_id && item.page" type="button" @click="preview?.open(item.document_id, item.page, item.title)">查看 PDF 第 {{ item.page }} 页</button>
           </li>
         </ul>
       </section>
     </template>
+    <CoursePdfPreview ref="preview" />
   </section>
 </template>
 

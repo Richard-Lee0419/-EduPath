@@ -3,6 +3,7 @@ package com.edupath.agenttask;
 import com.edupath.auth.AuthContext;
 import com.edupath.auth.JwtService;
 import com.edupath.common.JsonCodec;
+import com.edupath.course.CourseAccess;
 import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -17,6 +18,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.function.Supplier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.dao.DuplicateKeyException;
@@ -38,16 +40,25 @@ public class AgentTaskService {
     private final AgentTaskRepository agentTaskRepository;
     private final JsonCodec jsonCodec;
     private final long delayMillis;
+    private final CourseAccess courseAccess;
 
+    @Autowired
     public AgentTaskService(
             AsyncTaskExecutor taskExecutor,
             AgentTaskRepository agentTaskRepository,
             JsonCodec jsonCodec,
-            @Value("${edupath.demo-task-delay-millis:120}") long delayMillis) {
+            @Value("${edupath.demo-task-delay-millis:120}") long delayMillis,
+            CourseAccess courseAccess) {
         this.taskExecutor = taskExecutor;
         this.agentTaskRepository = agentTaskRepository;
         this.jsonCodec = jsonCodec;
         this.delayMillis = delayMillis;
+        this.courseAccess = courseAccess;
+    }
+
+    AgentTaskService(AsyncTaskExecutor taskExecutor, AgentTaskRepository agentTaskRepository, JsonCodec jsonCodec,
+            long delayMillis) {
+        this(taskExecutor, agentTaskRepository, jsonCodec, delayMillis, null);
     }
 
     @PostConstruct
@@ -85,9 +96,25 @@ public class AgentTaskService {
             String operationType,
             Object requestPayload,
             WorkflowExecutor executor) {
+        return createIdempotentCourseWorkflowTask(domain, idempotencyKey, plans, operationType, requestPayload,
+                List.of(), executor);
+    }
+
+    public TaskCreatedResponse createCourseWorkflowTask(
+            String domain, List<AgentStepPlan> plans, String operationType, Object requestPayload,
+            List<Long> courseIds, WorkflowExecutor executor) {
+        List<Long> scope = checkedClassCourses(courseIds);
+        return createTaskWithId(null, domain, plans, operationType, requestPayload, scope,
+                state -> runObservableWorkflow(state, plans, courseScoped(scope, executor))).asRegularResponse();
+    }
+
+    public synchronized IdempotentTaskCreatedResponse createIdempotentCourseWorkflowTask(
+            String domain, String idempotencyKey, List<AgentStepPlan> plans, String operationType,
+            Object requestPayload, List<Long> courseIds, WorkflowExecutor executor) {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             throw new IllegalArgumentException("idempotencyKey must not be blank");
         }
+        List<Long> scope = checkedClassCourses(courseIds);
         String deterministicSuffix = UUID.nameUUIDFromBytes(idempotencyKey.getBytes(StandardCharsets.UTF_8))
                 .toString()
                 .replace("-", "");
@@ -101,7 +128,29 @@ public class AgentTaskService {
                 plans,
                 operationType,
                 requestPayload,
-                state -> runObservableWorkflow(state, plans, executor));
+                scope,
+                state -> runObservableWorkflow(state, plans, courseScoped(scope, executor)));
+    }
+
+    private List<Long> checkedClassCourses(List<Long> courseIds) {
+        if (courseIds.isEmpty()) {
+            return List.of();
+        }
+        List<Long> scope = courseIds.stream().distinct().filter(courseAccess::isClassCourse).toList();
+        scope.forEach(courseAccess::requireReadable);
+        return scope;
+    }
+
+    private WorkflowExecutor courseScoped(List<Long> scope, WorkflowExecutor executor) {
+        if (scope.isEmpty()) {
+            return executor;
+        }
+        return progress -> {
+            scope.forEach(courseAccess::requireReadable);
+            Object result = executor.execute(progress);
+            scope.forEach(courseAccess::requireReadable);
+            return result;
+        };
     }
 
     private TaskCreatedResponse createTask(
@@ -110,7 +159,7 @@ public class AgentTaskService {
             String operationType,
             Object requestPayload,
             WorkflowRunner runner) {
-        return createTaskWithId(null, domain, plans, operationType, requestPayload, runner).asRegularResponse();
+        return createTaskWithId(null, domain, plans, operationType, requestPayload, List.of(), runner).asRegularResponse();
     }
 
     private IdempotentTaskCreatedResponse createTaskWithId(
@@ -119,6 +168,7 @@ public class AgentTaskService {
             List<AgentStepPlan> plans,
             String operationType,
             Object requestPayload,
+            List<Long> courseIds,
             WorkflowRunner runner) {
         String taskId = requestedTaskId == null
                 ? "task_" + domain + "_" + UUID.randomUUID().toString().replace("-", "")
@@ -127,16 +177,15 @@ public class AgentTaskService {
         TaskState state = new TaskState(taskId, plans);
         tasks.put(taskId, state);
         try {
-            agentTaskRepository.createTask(
-                    taskId,
-                    domain,
-                    "pending",
-                    0,
-                    operationType,
-                    requestPayload == null ? null : jsonCodec.toJson(requestPayload),
-                    principal == null ? null : principal.userId(),
-                    principal == null ? null : principal.username(),
-                    plans);
+            String payload = requestPayload == null ? null : jsonCodec.toJson(requestPayload);
+            Long actor = principal == null ? null : principal.userId();
+            String name = principal == null ? null : principal.username();
+            if (courseIds.isEmpty()) {
+                agentTaskRepository.createTask(taskId, domain, "pending", 0, operationType, payload, actor, name, plans);
+            } else {
+                agentTaskRepository.createScopedTask(
+                        taskId, domain, "pending", 0, operationType, payload, actor, name, plans, courseIds);
+            }
         } catch (DuplicateKeyException duplicate) {
             tasks.remove(taskId, state);
             requireTaskAccess(taskId);
@@ -208,7 +257,7 @@ public class AgentTaskService {
         int safeSize = Math.max(1, Math.min(size, 50));
         int offset = (safePage - 1) * safeSize;
         List<TaskListItem> items = agentTaskRepository
-                .listTasks(principal.userId(), normalizedStatus, safeSize, offset)
+                .listTasks(principal, normalizedStatus, safeSize, offset)
                 .stream()
                 .map(item -> new TaskListItem(
                         item.taskId(),
@@ -223,7 +272,7 @@ public class AgentTaskService {
                         item.createdAt(),
                         item.updatedAt()))
                 .toList();
-        long total = agentTaskRepository.countTasks(principal.userId(), normalizedStatus);
+        long total = agentTaskRepository.countTasks(principal, normalizedStatus);
         return new TaskListResponse(items, total, safePage, safeSize);
     }
 
@@ -252,7 +301,7 @@ public class AgentTaskService {
                     }
                     pause(Math.max(150, delayMillis));
                 }
-            } catch (IOException | IllegalStateException exception) {
+            } catch (IOException | IllegalStateException | ResponseStatusException exception) {
                 emitter.completeWithError(exception);
             } finally {
                 AuthContext.clear();
@@ -269,10 +318,12 @@ public class AgentTaskService {
 
     private void requireTaskAccess(AgentTaskRepository.TaskMetadata metadata) {
         JwtService.AuthPrincipal principal = AuthContext.requirePrincipal();
-        if ("admin".equals(principal.role()) || metadata.actorUserId() == principal.userId()) {
-            return;
+        if (!"admin".equals(principal.role()) && metadata.actorUserId() != principal.userId()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权访问该任务");
         }
-        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权访问该任务");
+        if (agentTaskRepository.hasUnreadableCourse(metadata.taskId(), principal)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "任务所属课程不可访问");
+        }
     }
 
     private void runWorkflow(TaskState state, List<AgentStepPlan> plans, Supplier<Object> resultSupplier) {

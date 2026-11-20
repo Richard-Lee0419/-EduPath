@@ -103,7 +103,7 @@ const refreshReadiness = async () => {
   const profileVersion = profile.status === 'fulfilled' ? profile.value.version : 0;
   const resourceCount = resources.status === 'fulfilled' ? resources.value.total : 0;
   const pathDays = path.status === 'fulfilled' ? path.value.learningPath.dailyPlan.length : 0;
-  const evaluationReady = evaluation.status === 'fulfilled' && (evaluation.value.mastery.length > 0 || evaluation.value.overallScore > 0);
+  const evaluationReady = evaluation.status === 'fulfilled' && (evaluation.value.mastery.length > 0 || Boolean(evaluation.value.reportId));
   const masteryCount = evaluation.status === 'fulfilled' ? evaluation.value.mastery.length : 0;
 
   readiness.value = [

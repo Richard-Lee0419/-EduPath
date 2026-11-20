@@ -3,6 +3,7 @@ package com.edupath.quiz;
 import com.edupath.ai.AiAgentClient;
 import com.edupath.auth.AuthContext;
 import com.edupath.common.ExternalServiceException;
+import com.edupath.course.CourseAccess;
 import com.edupath.course.CourseCatalogService;
 import com.edupath.path.LearningPathService;
 import com.edupath.profile.ProfileService;
@@ -26,18 +27,21 @@ public class QuizService {
     private final ProfileService profileService;
     private final AiAgentClient aiAgentClient;
     private final LearningPathService learningPathService;
+    private final CourseAccess courseAccess;
 
     public QuizService(
             CourseCatalogService courseCatalogService,
             QuizRepository quizRepository,
             ProfileService profileService,
             AiAgentClient aiAgentClient,
-            LearningPathService learningPathService) {
+            LearningPathService learningPathService,
+            CourseAccess courseAccess) {
         this.courseCatalogService = courseCatalogService;
         this.quizRepository = quizRepository;
         this.profileService = profileService;
         this.aiAgentClient = aiAgentClient;
         this.learningPathService = learningPathService;
+        this.courseAccess = courseAccess;
     }
 
     @Transactional
@@ -46,6 +50,7 @@ public class QuizService {
             request = new QuizGenerateRequest(1, List.of(), List.of(), "basic", 3);
         }
         int courseId = request.courseId() == null ? 1 : request.courseId();
+        courseAccess.requireReadable(courseId);
         int questionCount = request.questionCount() == null ? 3 : request.questionCount();
         if (questionCount < 1 || questionCount > 3) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "question_count 必须在 1 到 3 之间");
@@ -134,6 +139,7 @@ public class QuizService {
 
     @Transactional
     public QuizSubmitResult submit(QuizSubmitRequest request) {
+        int courseId = accessibleQuizCourse(request.quizId());
         List<QuizRepository.QuestionRow> questions = quizRepository.questions(request.quizId());
         if (questions.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "测验不存在: " + request.quizId());
@@ -164,7 +170,6 @@ public class QuizService {
                 : (int) Math.round(correct * 100.0 / questions.size());
         Map<String, Object> evaluationPayload = new LinkedHashMap<>();
         evaluationPayload.put("quiz_id", request.quizId());
-        int courseId = quizRepository.courseId(request.quizId());
         evaluationPayload.put("course_id", courseId);
         evaluationPayload.put("score", score);
         evaluationPayload.put("question_results", questionResults.stream()
@@ -205,12 +210,16 @@ public class QuizService {
         }
         String recommendation = String.join("；", nextActions);
         String studentId = AuthContext.currentStudentId();
+        boolean classCourse = courseAccess.isClassCourse(courseId);
+        courseAccess.requireReadable(courseId);
         long attemptId = quizRepository.saveAttempt(
                 request.quizId(), studentId, request.answers(), score, weakPoints, mistakePatterns, recommendation);
         for (QuestionResult result : questionResults) {
             quizRepository.saveAttemptItem(
                     attemptId, result.questionId(), result.submittedAnswer(), result.correctAnswer(), result.correct());
-            quizRepository.updateMastery(studentId, result.knowledgePoint(), result.correct());
+            if (!classCourse) {
+                quizRepository.updateMastery(studentId, result.knowledgePoint(), result.correct());
+            }
             if (!result.correct()) {
                 quizRepository.saveWrongQuestion(
                         studentId,
@@ -221,8 +230,8 @@ public class QuizService {
             }
         }
         String sourceTaskId = String.valueOf(aiResponse.getOrDefault("task_id", ""));
-        Map<String, Object> profileUpdate = profileService.updateAfterQuizResult(
-                score, weakPoints, mistakePatterns, recommendation, sourceTaskId);
+        Map<String, Object> profileUpdate = classCourse ? Map.of("updated", false, "scope", "class_course")
+                : profileService.updateAfterQuizResult(score, weakPoints, mistakePatterns, recommendation, sourceTaskId);
         Map<String, Object> pathUpdate = learningPathService.replanAfterEvaluation(
                 courseId,
                 request.quizId(),
@@ -244,11 +253,14 @@ public class QuizService {
                 sourceTaskId);
     }
 
-    public QuizHistoryResponse history(int page, int size) {
+    public QuizHistoryResponse history(int page, int size, Integer courseId) {
+        if (courseId != null) {
+            courseAccess.requireReadable(courseId);
+        }
         int normalizedPage = Math.max(1, page);
         int normalizedSize = Math.max(1, Math.min(size, 50));
         return new QuizHistoryResponse(
-                quizRepository.attempts(AuthContext.currentStudentId(), normalizedPage, normalizedSize),
+                quizRepository.attempts(AuthContext.currentStudentId(), normalizedPage, normalizedSize, courseId),
                 normalizedPage,
                 normalizedSize);
     }
@@ -262,8 +274,26 @@ public class QuizService {
                 normalizedSize);
     }
 
-    public MasteryResponse mastery() {
-        return new MasteryResponse(quizRepository.mastery(AuthContext.currentStudentId()));
+    public MasteryResponse mastery(Integer courseId) {
+        String studentId = AuthContext.currentStudentId();
+        if (courseId != null) {
+            courseAccess.requireReadable(courseId);
+            if (courseAccess.isClassCourse(courseId)) {
+                return new MasteryResponse(quizRepository.classMastery(studentId, courseId));
+            }
+        }
+        return new MasteryResponse(quizRepository.mastery(studentId));
+    }
+
+    int accessibleQuizCourse(long quizId) {
+        int courseId = quizRepository.findQuizCourse(quizId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "测验不存在"));
+        courseAccess.requireReadable(courseId);
+        return courseId;
+    }
+
+    boolean isClassCourse(int courseId) {
+        return courseAccess.isClassCourse(courseId);
     }
 
     @Transactional
@@ -294,6 +324,11 @@ public class QuizService {
     }
 
     public void updateQuestionBankStatus(long id, QuestionBankStatusUpdateRequest request) {
+        int courseId = quizRepository.findQuestionBankCourse(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "题目不存在: " + id));
+        if (courseAccess.isClassCourse(courseId) && !courseAccess.canManage(courseId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "题目不存在或当前账号无权访问");
+        }
         int updated = quizRepository.updateQuestionBankStatus(id, request.status());
         if (updated == 0) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "题目不存在: " + id);

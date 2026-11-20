@@ -1,14 +1,19 @@
 package com.edupath.quiz;
 
+import com.edupath.auth.AuthContext;
 import com.edupath.common.JsonCodec;
+import com.edupath.course.CourseAccess;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -23,7 +28,7 @@ public class QuizRepository {
     }
 
     public long createQuiz(String title, int courseId, String difficulty) {
-        jdbcTemplate.update(
+        return insert("quiz_id",
                 """
                 INSERT INTO quizzes (title, course_id, difficulty, status, created_at)
                 VALUES (?, ?, ?, 'active', CURRENT_TIMESTAMP)
@@ -31,8 +36,6 @@ public class QuizRepository {
                 title,
                 courseId,
                 difficulty);
-        Long id = jdbcTemplate.queryForObject("SELECT MAX(quiz_id) FROM quizzes", Long.class);
-        return id == null ? 0 : id;
     }
 
     public long addQuestion(
@@ -45,7 +48,7 @@ public class QuizRepository {
             List<String> options,
             String answer,
             String explanation) {
-        jdbcTemplate.update(
+        return insert("question_id",
                 """
                 INSERT INTO quiz_questions (
                     quiz_id, question_order, question_type, difficulty, knowledge_point,
@@ -61,8 +64,6 @@ public class QuizRepository {
                 jsonCodec.toJson(options),
                 answer,
                 explanation);
-        Long id = jdbcTemplate.queryForObject("SELECT MAX(question_id) FROM quiz_questions", Long.class);
-        return id == null ? 0 : id;
     }
 
     public List<QuestionRow> questions(long quizId) {
@@ -77,13 +78,9 @@ public class QuizRepository {
                 quizId);
     }
 
-    public int courseId(long quizId) {
-        Integer courseId = jdbcTemplate.queryForObject(
-                "SELECT course_id FROM quizzes WHERE quiz_id = ?", Integer.class, quizId);
-        if (courseId == null) {
-            throw new IllegalStateException("测验缺少课程信息: " + quizId);
-        }
-        return courseId;
+    public Optional<Integer> findQuizCourse(long quizId) {
+        return jdbcTemplate.queryForList("SELECT course_id FROM quizzes WHERE quiz_id = ?", Integer.class, quizId)
+                .stream().findFirst();
     }
 
     public long saveAttempt(
@@ -94,7 +91,7 @@ public class QuizRepository {
             List<String> weakPoints,
             List<String> mistakePatterns,
             String recommendation) {
-        jdbcTemplate.update(
+        return insert("attempt_id",
                 """
                 INSERT INTO quiz_attempts (
                     quiz_id, student_id, answers, score, weak_points, mistake_patterns, recommendation, submitted_at
@@ -107,8 +104,6 @@ public class QuizRepository {
                 jsonCodec.toJson(weakPoints),
                 jsonCodec.toJson(mistakePatterns),
                 recommendation);
-        Long id = jdbcTemplate.queryForObject("SELECT MAX(attempt_id) FROM quiz_attempts", Long.class);
-        return id == null ? 0 : id;
     }
 
     public void saveAttemptItem(
@@ -204,33 +199,71 @@ public class QuizRepository {
             int attempts, int correctCount, int behaviorWeight, int behaviorScoreSum) {}
 
     public List<AttemptRow> attempts(String studentId, int page, int size) {
+        return attempts(studentId, page, size, null);
+    }
+
+    public List<AttemptRow> attempts(String studentId, int page, int size, Integer courseId) {
+        return attempts(studentId, page, size, courseId, false);
+    }
+
+    public List<AttemptRow> attempts(String studentId, int page, int size, Integer courseId, boolean publicByDefault) {
+        var viewer = AuthContext.current();
+        var scope = CourseAccess.readableCourses("q.course_id", viewer == null ? null : viewer.userId(),
+                viewer == null ? null : viewer.role());
+        List<Object> arguments = new ArrayList<>();
+        arguments.add(studentId);
+        String filter = "";
+        if (courseId != null) {
+            filter = " AND q.course_id = ?";
+            arguments.add(courseId);
+        } else if (publicByDefault) {
+            filter = " AND NOT EXISTS (SELECT 1 FROM courses c WHERE c.id = q.course_id AND c.visibility = 'class')";
+        }
+        scope.ifPresent(value -> arguments.addAll(value.arguments()));
+        arguments.add(size);
+        arguments.add((page - 1) * size);
         return jdbcTemplate.query(
                 """
-                SELECT attempt_id, quiz_id, student_id, score, weak_points, mistake_patterns, recommendation, submitted_at
-                FROM quiz_attempts
-                WHERE student_id = ?
-                ORDER BY submitted_at DESC
+                SELECT qa.attempt_id, qa.quiz_id, qa.student_id, qa.score, qa.weak_points, qa.mistake_patterns,
+                       qa.recommendation, qa.submitted_at
+                FROM quiz_attempts qa LEFT JOIN quizzes q ON q.quiz_id = qa.quiz_id
+                WHERE qa.student_id = ?
+                """ + filter + sql(scope) + """
+                 ORDER BY qa.submitted_at DESC
                 LIMIT ? OFFSET ?
                 """,
                 this::mapAttempt,
-                studentId,
-                size,
-                (page - 1) * size);
+                arguments.toArray());
     }
 
     public List<WrongQuestionRow> wrongQuestions(String studentId, int page, int size) {
+        var viewer = AuthContext.current();
+        var scope = CourseAccess.readableCourses("q.course_id", viewer == null ? null : viewer.userId(),
+                viewer == null ? null : viewer.role());
         return jdbcTemplate.query(
                 """
-                SELECT id, student_id, quiz_id, question_id, knowledge_point, mistake_pattern, created_at
-                FROM wrong_question_book
-                WHERE student_id = ?
-                ORDER BY created_at DESC
+                SELECT w.id, w.student_id, w.quiz_id, w.question_id, w.knowledge_point, w.mistake_pattern, w.created_at
+                FROM wrong_question_book w LEFT JOIN quizzes q ON q.quiz_id = w.quiz_id
+                WHERE w.student_id = ?
+                """ + sql(scope) + """
+                 ORDER BY w.created_at DESC
                 LIMIT ? OFFSET ?
                 """,
                 this::mapWrongQuestion,
-                studentId,
-                size,
-                (page - 1) * size);
+                pageArguments(studentId, scope, page, size));
+    }
+
+    private String sql(Optional<CourseAccess.Scope> scope) {
+        return scope.map(value -> " AND " + value.sql()).orElse("");
+    }
+
+    private Object[] pageArguments(Object filter, Optional<CourseAccess.Scope> scope, int page, int size) {
+        List<Object> arguments = new ArrayList<>();
+        arguments.add(filter);
+        scope.ifPresent(value -> arguments.addAll(value.arguments()));
+        arguments.add(size);
+        arguments.add((page - 1) * size);
+        return arguments.toArray();
     }
 
     public List<MasteryRow> mastery(String studentId) {
@@ -245,6 +278,14 @@ public class QuizRepository {
                 studentId);
     }
 
+    public List<MasteryRow> classMastery(String studentId, int courseId) {
+        return jdbcTemplate.query("""
+                SELECT student_id, knowledge_point, attempts, correct_count, mastery_score, updated_at
+                FROM class_course_mastery WHERE student_id = ? AND course_id = ?
+                ORDER BY mastery_score ASC, updated_at DESC
+                """, this::mapMastery, studentId, courseId);
+    }
+
     public long createQuestionBankItem(
             int courseId,
             String knowledgePoint,
@@ -255,7 +296,7 @@ public class QuizRepository {
             String answer,
             String explanation,
             String createdBy) {
-        jdbcTemplate.update(
+        return insert("id",
                 """
                 INSERT INTO question_bank (
                     course_id, knowledge_point, question_type, difficulty, question, options,
@@ -271,42 +312,60 @@ public class QuizRepository {
                 answer,
                 explanation,
                 createdBy);
-        Long id = jdbcTemplate.queryForObject("SELECT MAX(id) FROM question_bank", Long.class);
-        return id == null ? 0 : id;
+    }
+
+    private long insert(String keyColumn, String sql, Object... values) {
+        var keys = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            var statement = connection.prepareStatement(sql, new String[] {keyColumn});
+            for (int i = 0; i < values.length; i++) {
+                statement.setObject(i + 1, values[i]);
+            }
+            return statement;
+        }, keys);
+        Number id = keys.getKey();
+        if (id == null) {
+            throw new IllegalStateException("无法读取新建测验记录的主键");
+        }
+        return id.longValue();
     }
 
     public List<QuestionBankRow> questionBank(Integer courseId, String status, int page, int size) {
+        StringBuilder filter = new StringBuilder();
+        List<Object> arguments = new ArrayList<>();
         if (courseId != null) {
-            return jdbcTemplate.query(
-                    """
-                    SELECT id, course_id, knowledge_point, question_type, difficulty, question, options,
-                           answer, explanation, status, created_by, created_at
-                    FROM question_bank
-                    WHERE course_id = ? AND (? IS NULL OR status = ?)
-                    ORDER BY created_at DESC
-                    LIMIT ? OFFSET ?
-                    """,
-                    this::mapQuestionBank,
-                    courseId,
-                    status,
-                    status,
-                    size,
-                    (page - 1) * size);
+            filter.append(" AND course_id = ?");
+            arguments.add(courseId);
         }
+        if (status != null) {
+            filter.append(" AND status = ?");
+            arguments.add(status);
+        }
+        var principal = AuthContext.requirePrincipal();
+        if ("teacher".equals(principal.role())) {
+            var scope = CourseAccess.manageableCourses("question_bank.course_id", principal.userId(), true);
+            filter.append(" AND ").append(scope.sql());
+            arguments.addAll(scope.arguments());
+        }
+        arguments.add(size);
+        arguments.add((page - 1) * size);
         return jdbcTemplate.query(
                 """
                 SELECT id, course_id, knowledge_point, question_type, difficulty, question, options,
                        answer, explanation, status, created_by, created_at
                 FROM question_bank
-                WHERE (? IS NULL OR status = ?)
+                WHERE 1 = 1
+                """ + filter + """
                 ORDER BY created_at DESC
                 LIMIT ? OFFSET ?
                 """,
                 this::mapQuestionBank,
-                status,
-                status,
-                size,
-                (page - 1) * size);
+                arguments.toArray());
+    }
+
+    Optional<Integer> findQuestionBankCourse(long id) {
+        return jdbcTemplate.queryForList("SELECT course_id FROM question_bank WHERE id = ?", Integer.class, id)
+                .stream().findFirst();
     }
 
     public int updateQuestionBankStatus(long id, String status) {

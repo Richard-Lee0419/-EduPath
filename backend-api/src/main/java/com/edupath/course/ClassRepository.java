@@ -7,6 +7,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -19,16 +20,18 @@ public class ClassRepository {
     }
 
     public long create(String name, String description, long ownerUserId) {
-        jdbcTemplate.update(
-                """
-                INSERT INTO classes (name, description, owner_user_id, status, created_at, updated_at)
-                VALUES (?, ?, ?, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """,
-                name,
-                description,
-                ownerUserId == 0 ? null : ownerUserId);
-        Long id = jdbcTemplate.queryForObject("SELECT MAX(id) FROM classes", Long.class);
-        return id == null ? 0 : id;
+        GeneratedKeyHolder key = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            var statement = connection.prepareStatement("""
+                    INSERT INTO classes (name, description, owner_user_id, status)
+                    VALUES (?, ?, ?, 'active')
+                    """, new String[] {"id"});
+            statement.setString(1, name);
+            statement.setString(2, description);
+            statement.setObject(3, ownerUserId == 0 ? null : ownerUserId);
+            return statement;
+        }, key);
+        return key.getKey().longValue();
     }
 
     public List<ClassRow> list() {
@@ -111,6 +114,25 @@ public class ClassRepository {
                 """,
                 classId,
                 courseId);
+    }
+
+    List<Long> courseClassIds(long courseId) {
+        return jdbcTemplate.queryForList("""
+                SELECT class_id FROM class_courses WHERE course_id = ? AND status = 'active' ORDER BY class_id
+                """, Long.class, courseId);
+    }
+
+    void replaceCourseClasses(long courseId, List<Long> classIds) {
+        List<Long> current = courseClassIds(courseId);
+        for (long classId : current) {
+            if (!classIds.contains(classId)) {
+                jdbcTemplate.update("UPDATE class_courses SET status = 'inactive' WHERE class_id = ? AND course_id = ?",
+                        classId, courseId);
+            }
+        }
+        for (long classId : classIds) {
+            if (!current.contains(classId)) addCourse(classId, courseId);
+        }
     }
 
     public void addMember(long classId, long userId, String role) {

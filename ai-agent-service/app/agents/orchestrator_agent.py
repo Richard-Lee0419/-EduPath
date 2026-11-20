@@ -113,22 +113,36 @@ class OrchestratorAgent:
         query: str,
         top_k: int,
         knowledge_point_ids: list[int] | None = None,
+        *,
+        require_relevance: bool = False,
     ) -> list[RagEvidence]:
-        return self.knowledge_agent.retrieve(course_id, query, top_k, knowledge_point_ids)
+        return self.knowledge_agent.retrieve(
+            course_id, query, top_k, knowledge_point_ids, require_relevance=require_relevance
+        )
 
-    def ingest_knowledge_document(self, request: Any, text: str) -> dict[str, object]:
+    def ingest_knowledge_document(
+        self, request: Any, text: str, *, pages: list[tuple[int, str]] | None = None
+    ) -> dict[str, object]:
         planned_agents = ["DocumentParser", "Chunker", "SafetyAgent", "EmbeddingAgent", "KnowledgeAgent"]
-        course_code = _course_code(request.course_id)
+        course_code = getattr(request, "course_code", None) or _course_code(request.course_id)
         knowledge_point = request.knowledge_point or request.filename.rsplit(".", 1)[0]
+        if pages is not None:
+            knowledge_point = knowledge_point.strip()[:80]
+            if len(knowledge_point) < 2:
+                knowledge_point = "课程资料"
+        knowledge_point_id = request.knowledge_point_id
+        if not knowledge_point_id:
+            knowledge_point_id = 0 if pages is not None else request.document_id
         chunks = self.knowledge_agent.prepare_uploaded_document(
             document_id=request.document_id,
             course_id=request.course_id,
             course_code=course_code,
-            knowledge_point_id=request.knowledge_point_id or request.document_id,
+            knowledge_point_id=knowledge_point_id,
             knowledge_point=knowledge_point,
             title=request.filename,
             content=text,
             source=request.source or f"{course_code}/{request.filename}",
+            pages=pages,
         )
         chunk_evidence = self.knowledge_agent.uploaded_chunk_evidence(chunks)
         safety = self.safety_agent.review(text, chunk_evidence, require_evidence=False)
@@ -239,6 +253,8 @@ class OrchestratorAgent:
             "content": item.content,
             "score": item.score,
             "source": item.source,
+            "document_id": item.document_id,
+            "page": item.page,
             "author": item.author,
             "source_url": item.source_url,
             "license": item.license,

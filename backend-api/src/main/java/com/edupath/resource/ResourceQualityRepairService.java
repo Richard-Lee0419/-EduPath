@@ -4,6 +4,7 @@ import com.edupath.agenttask.AgentTaskService;
 import com.edupath.ai.AiAgentClient;
 import com.edupath.auth.AuthContext;
 import com.edupath.auth.RoleGuard;
+import com.edupath.course.CourseAccess;
 import com.edupath.storage.ObjectStorageService;
 import com.edupath.storage.ObjectStorageService.StoredObject;
 import java.nio.charset.StandardCharsets;
@@ -31,6 +32,7 @@ public class ResourceQualityRepairService {
     private final AiAgentClient aiAgentClient;
     private final RoleGuard roleGuard;
     private final ObjectStorageService objectStorageService;
+    private final CourseAccess courseAccess;
 
     public ResourceQualityRepairService(
             ResourceQualityRepairRepository repairRepository,
@@ -38,13 +40,15 @@ public class ResourceQualityRepairService {
             AgentTaskService agentTaskService,
             AiAgentClient aiAgentClient,
             RoleGuard roleGuard,
-            ObjectStorageService objectStorageService) {
+            ObjectStorageService objectStorageService,
+            CourseAccess courseAccess) {
         this.repairRepository = repairRepository;
         this.resourceRepository = resourceRepository;
         this.agentTaskService = agentTaskService;
         this.aiAgentClient = aiAgentClient;
         this.roleGuard = roleGuard;
         this.objectStorageService = objectStorageService;
+        this.courseAccess = courseAccess;
     }
 
     public RepairListResponse list(Integer courseId, String status, int page, int size) {
@@ -116,11 +120,12 @@ public class ResourceQualityRepairService {
                 new AgentTaskService.AgentStepPlan(
                         "QualityEvaluator", "正在重新执行五维质量门禁", "已完成候选版本质量判定"));
         try {
-            AgentTaskService.TaskCreatedResponse created = agentTaskService.createObservableWorkflowTask(
+            AgentTaskService.TaskCreatedResponse created = agentTaskService.createCourseWorkflowTask(
                     "quality_repair",
                     plans,
                     "quality_repair",
                     new RepairExecutionRequest(repairId),
+                    List.of((long) row.courseId()),
                     progress -> executeRepair(repairId, resourceAgent, progress));
             repairRepository.bindExecutionTask(repairId, created.taskId());
             return new RepairExecutionCreated(repairId, created.taskId(), "in_progress");
@@ -137,6 +142,7 @@ public class ResourceQualityRepairService {
         try {
             ResourceQualityRepairRepository.RepairRow repair = repairRepository.find(repairId)
                     .orElseThrow(() -> new IllegalStateException("修复队列项执行期间丢失: " + repairId));
+            roleGuard.requireCourseManager(repair.courseId());
             ResourceRepository.ResourceRow resource = resourceRepository.find(repair.resourceId())
                     .orElseThrow(() -> new IllegalStateException("原资源不存在: " + repair.resourceId()));
             progress.running("RepairPlannerAgent", "正在锁定回归维度和原始证据", 10);
@@ -397,6 +403,9 @@ public class ResourceQualityRepairService {
         payload.put("repair_id", repair.repairId());
         payload.put("resource_id", resource.resourceId());
         payload.put("course_id", resource.courseId());
+        if (courseAccess.isClassCourse(resource.courseId())) {
+            payload.put("local_only", true);
+        }
         payload.put("resource", storedResource);
         payload.put("evidence", evidence);
         payload.put("safety", safety);

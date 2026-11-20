@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { getCourses } from '../api/course';
+import { getCourses, learningCourses } from '../api/course';
 import { getEvaluationReport } from '../api/evaluation';
 import { generateLearningPath, getCurrentLearningPath } from '../api/learningPath';
 import { getCurrentProfile } from '../api/profile';
 import { listResources } from '../api/resource';
 import { waitForAgentTask } from '../api/task';
 import type { EvaluationReport, LearningPath, PageKey, Profile } from '../types';
+import type { Course } from '@/types/api';
 
 const emit = defineEmits<{
   navigate: [page: PageKey];
@@ -22,6 +23,7 @@ const learningPath = ref<LearningPath | null>(null);
 const resourceCount = ref(0);
 const courseNames = ref<string[]>([]);
 const courseIds = ref<number[]>([]);
+const classCourses = ref<Course[]>([]);
 const loadError = ref('');
 const todayTaskLabel = '今日学习任务';
 const todayTaskLabelCharacters = Array.from(todayTaskLabel);
@@ -52,8 +54,8 @@ const heroReason = computed(() => {
   if (!weak) {
     return '完成画像对话、测验或学习路径生成后，这里会展示真实推荐原因。';
   }
-  return score
-    ? `评估掌握度 ${score}%，系统建议优先巩固「${weak}」。`
+  return evaluation.value?.reportId
+    ? `最近一次测验得分 ${score} 分，建议优先巩固「${weak}」。`
     : `根据最新学习画像，系统建议优先巩固「${weak}」。`;
 });
 
@@ -121,7 +123,7 @@ const supportCards = computed(() => [
   {
     title: '掌握度检测',
     icon: '▣',
-    description: evaluation.value ? `当前综合掌握度 ${evaluation.value.overallScore}%` : '完成测验后自动刷新评估',
+    description: evaluation.value?.reportId ? `最近一次测验得分 ${evaluation.value.overallScore} 分` : '完成测验后自动刷新评估',
     action: '开始测验',
     target: 'evaluation' as PageKey,
     tone: 'data',
@@ -133,7 +135,7 @@ const agents = computed(() => [
   { name: 'KnowledgeAgent', role: 'RAG 知识检索', state: '可检索' },
   { name: 'PlannerAgent', role: '学习路径规划', state: plannerLoading.value ? `${plannerProgress.value}%` : '可触发', active: plannerLoading.value },
   { name: 'ResourceAgent', role: '资源学习创作', state: resourceCount.value ? '有资源' : '待生成' },
-  { name: 'EvaluationAgent', role: '综合评估', state: evaluation.value ? `${evaluation.value.overallScore}%` : '待评估' },
+  { name: 'EvaluationAgent', role: '综合评估', state: evaluation.value?.reportId ? `${evaluation.value.overallScore} 分` : '待评估' },
 ]);
 
 const evidenceCards = computed(() => [
@@ -163,19 +165,24 @@ const evidenceCards = computed(() => [
 
 onMounted(async () => {
   try {
-    const [profileResult, report, pathResult, resources, courses] = await Promise.all([
+    const available = learningCourses(await getCourses());
+    courseNames.value = available.map((course) => course.name);
+    courseIds.value = available.filter((course) => course.visibility !== 'class').map((course) => course.id);
+    classCourses.value = available.filter((course) => course.visibility === 'class');
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : '课程目录加载失败';
+  }
+  try {
+    const [profileResult, report, pathResult, resources] = await Promise.all([
       getCurrentProfile(),
       getEvaluationReport(),
       getCurrentLearningPath(),
       listResources({ page: 1, size: 1 }),
-      getCourses(),
     ]);
     profile.value = profileResult.profile;
     evaluation.value = report;
     learningPath.value = pathResult.learningPath;
     resourceCount.value = resources.total;
-    courseNames.value = courses.map((course) => course.name);
-    courseIds.value = courses.map((course) => course.id);
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : '学习首页数据加载失败';
   }
@@ -233,6 +240,17 @@ onMounted(async () => {
           </div>
         </dl>
       </aside>
+    </section>
+
+    <section v-if="classCourses.length" aria-label="我的班级课程">
+      <h2>我的班级课程</h2>
+      <div class="learning-home__support-grid">
+        <article v-for="course in classCourses" :key="course.id" class="learning-home__support-card interactive-card">
+          <h3>{{ course.name }}</h3>
+          <p v-if="course.description">{{ course.description }}</p>
+          <a :href="`/knowledge-base?course=${course.id}`">进入课程</a>
+        </article>
+      </div>
     </section>
 
     <section class="learning-home__featured interactive-card" @click="openPage('tutor')">

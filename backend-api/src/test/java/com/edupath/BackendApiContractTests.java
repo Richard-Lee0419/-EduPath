@@ -952,6 +952,14 @@ class BackendApiContractTests {
         assertThat(JsonPath.<List<?>>read(tutorTaskJson, "$.data.result.learning_update.mastery_updates"))
                 .isEmpty();
         String tutorSessionId = JsonPath.read(tutorTaskJson, "$.data.result.session_id");
+        mockMvc.perform(post("/api/tutor/chat").header("Authorization", bearer(registerStudent("tutor_scope_student")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"course_id\":1,\"question\":\"继续解释递归？\",\"session_id\":\"" + tutorSessionId + "\"}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/tutor/chat").header("Authorization", bearer(bobToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"course_id\":2,\"question\":\"继续解释递归？\",\"session_id\":\"" + tutorSessionId + "\"}"))
+                .andExpect(status().isBadRequest());
         MvcResult tutorFollowUpTask = mockMvc.perform(post("/api/tutor/chat")
                         .header("Authorization", bearer(bobToken))
                         .contentType(MediaType.APPLICATION_JSON)

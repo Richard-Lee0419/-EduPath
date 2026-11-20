@@ -1,5 +1,8 @@
 package com.edupath.resource;
 
+import com.edupath.auth.AuthContext;
+import com.edupath.course.CourseAccess;
+
 import com.edupath.common.JsonCodec;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -121,6 +124,7 @@ public class ResourceRepository {
             args.add(ownerUserId);
         }
         appendManagerScope(sql, args, managerUserId);
+        appendCurrentActorScope(sql, args);
         if (courseId != null) {
             sql.append(" AND course_id = ?");
             args.add(courseId);
@@ -167,6 +171,7 @@ public class ResourceRepository {
             args.add(ownerUserId);
         }
         appendManagerScope(sql, args, managerUserId);
+        appendCurrentActorScope(sql, args);
         if (courseId != null) {
             sql.append(" AND course_id = ?");
             args.add(courseId);
@@ -190,10 +195,19 @@ public class ResourceRepository {
 
     private void appendManagerScope(StringBuilder sql, List<Object> args, Long managerUserId) {
         if (managerUserId != null) {
-            sql.append(" AND EXISTS (SELECT 1 FROM user_course_roles ucr"
-                    + " WHERE ucr.user_id = ? AND ucr.course_id = resources.course_id)");
-            args.add(managerUserId);
+            var management = CourseAccess.manageableCourses("resources.course_id", managerUserId, false);
+            sql.append(" AND ").append(management.sql());
+            args.addAll(management.arguments());
         }
+    }
+
+    private void appendCurrentActorScope(StringBuilder sql, List<Object> args) {
+        var actor = AuthContext.current();
+        CourseAccess.readableCourses("resources.course_id", actor == null ? null : actor.userId(),
+                actor == null ? null : actor.role()).ifPresent(scope -> {
+                    sql.append(" AND ").append(scope.sql());
+                    args.addAll(scope.arguments());
+                });
     }
 
     public void addInteraction(String resourceId, long userId, String action, Integer rating, Integer progressPercent) {
@@ -254,14 +268,17 @@ public class ResourceRepository {
                 sql.append(" OR (status = 'published' AND owner_user_id = ?)");
                 args.add(ownerUserId);
                 if ("teacher".equals(viewerRole)) {
-                    sql.append(" OR EXISTS (SELECT 1 FROM user_course_roles ucr"
-                            + " WHERE ucr.user_id = ? AND ucr.course_id = resources.course_id"
-                            + ")");
-                    args.add(ownerUserId);
+                    var management = CourseAccess.manageableCourses("resources.course_id", ownerUserId, false);
+                    sql.append(" OR ").append(management.sql());
+                    args.addAll(management.arguments());
                 }
             }
             sql.append(")");
         }
+        CourseAccess.readableCourses("resources.course_id", ownerUserId, viewerRole).ifPresent(scope -> {
+            sql.append(" AND ").append(scope.sql());
+            args.addAll(scope.arguments());
+        });
         if (courseId != null) {
             sql.append(" AND course_id = ?");
             args.add(courseId);

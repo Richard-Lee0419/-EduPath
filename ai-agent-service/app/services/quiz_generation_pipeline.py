@@ -39,11 +39,16 @@ class QuizGenerationPipeline:
         safe_profile = _safe_profile(request.student_profile)
         query_parts = [*_safe_strings(request.knowledge_points), *_safe_strings(safe_profile.get("weak_points"))]
         query = " ".join(query_parts) or "课程核心概念 典型例题"
+        topic_query = " ".join(_safe_strings(request.knowledge_points))
+        if request.local_only and request.knowledge_point_ids and topic_query:
+            query = topic_query
         evidence = self.knowledge_agent.retrieve(
             request.course_id,
             query,
             top_k=max(3, request.question_count),
             knowledge_point_ids=request.knowledge_point_ids or None,
+            require_knowledge_points=request.local_only,
+            knowledge_point_query=topic_query,
         )
         if not evidence:
             raise LLMGatewayError("KnowledgeAgent returned no evidence for quiz generation")
@@ -52,7 +57,8 @@ class QuizGenerationPipeline:
         requested_points = _safe_strings(request.knowledge_points)
         topics = [point for point in requested_points if point in evidence_points]
         topics.extend(point for point in evidence_points if point not in topics)
-        baseline = self.quiz_agent.generate_quiz(
+        generate = self.quiz_agent.generate_material_quiz if request.local_only else self.quiz_agent.generate_quiz
+        baseline = generate(
             "、".join(topics[:3]) or "课程知识点",
             request.difficulty,
             request.question_count,
@@ -62,7 +68,7 @@ class QuizGenerationPipeline:
         calls: list[ModelCallRecord] = []
         quiz = baseline
         model_output_used = False
-        if self.llm_gateway.is_configured:
+        if self.llm_gateway.is_configured and not request.local_only:
             try:
                 quiz = self._generate_with_model(request, safe_profile, baseline, evidence, calls)
                 model_output_used = True
@@ -257,7 +263,10 @@ def _evidence_context(item: RagEvidence) -> dict[str, object]:
 
 
 def _resource_evidence(item: RagEvidence) -> ResourceEvidence:
-    return ResourceEvidence(chunk_id=item.chunk_id, title=item.title, content=item.content, score=item.score, source=item.source)
+    return ResourceEvidence(
+        chunk_id=item.chunk_id, title=item.title, content=item.content, score=item.score, source=item.source,
+        document_id=item.document_id, page=item.page,
+    )
 
 
 def _combine_reviews(local: SafetyReview, remote: SafetyReview) -> SafetyReview:

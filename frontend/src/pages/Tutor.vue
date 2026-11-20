@@ -1,25 +1,34 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { getCourses } from '../api/course';
+import { getCourses, learningCourses, requestedCourseId } from '../api/course';
 import { getCurrentProfile } from '../api/profile';
 import { chatWithTutor } from '../api/tutor';
 import RichContentRenderer from '../components/RichContentRenderer.vue';
+import PersonalPdfTutor from '../components/PersonalPdfTutor.vue';
+import CoursePdfPreview from '../components/CoursePdfPreview.vue';
 import type { PageKey, Profile, TutorAnswer } from '../types';
+import type { Course } from '@/types/api';
 
 const emit = defineEmits<{
   navigate: [page: PageKey];
 }>();
+defineProps<{ showPersonalPdf: boolean }>();
 
 const question = ref('');
 const answer = ref<TutorAnswer | null>(null);
+const answerCourseId = ref<number | null>(null);
+const personalMode = ref(false);
 const loading = ref(false);
 const mode = ref<'summary' | 'diagram' | 'code' | 'exam'>('diagram');
 const activeTaskId = ref('');
 const taskProgress = ref(0);
 const errorMessage = ref('');
 const profile = ref<Profile | null>(null);
-const courses = ref<Array<{ id: number; name: string }>>([]);
+const courses = ref<Course[]>([]);
 const selectedCourseId = ref<number | null>(null);
+const explicitCourse = ref(Boolean(requestedCourseId()));
+const preview = ref<InstanceType<typeof CoursePdfPreview> | null>(null);
+const selectedCourse = computed(() => courses.value.find((course) => course.id === selectedCourseId.value));
 
 const weakPoints = computed(() => profile.value?.weakPoints.filter(Boolean) ?? []);
 const cognitiveStyle = computed(() => profile.value?.cognitiveStyle.filter(Boolean) ?? []);
@@ -65,10 +74,10 @@ const inferCourseId = (text: string) => {
   ];
 
   if (computerOrganizationKeywords.some((keyword) => normalized.includes(keyword))) {
-    return courses.value.find((course) => /组成|organization/i.test(course.name))?.id ?? null;
+    return courses.value.find((course) => course.visibility !== 'class' && /组成|organization/i.test(course.name))?.id ?? null;
   }
   if (algorithmKeywords.some((keyword) => normalized.includes(keyword))) {
-    return courses.value.find((course) => /数据结构|算法|algorithm/i.test(course.name))?.id ?? null;
+    return courses.value.find((course) => course.visibility !== 'class' && /数据结构|算法|algorithm/i.test(course.name))?.id ?? null;
   }
   return null;
 };
@@ -84,7 +93,7 @@ const askTutor = async () => {
     if (!selectedCourseId.value) {
       throw new Error('课程列表尚未加载，无法创建辅导任务');
     }
-    const inferredCourseId = inferCourseId(text);
+    const inferredCourseId = explicitCourse.value ? null : inferCourseId(text);
     const requestCourseId = inferredCourseId ?? selectedCourseId.value;
     if (inferredCourseId && inferredCourseId !== selectedCourseId.value) {
       selectedCourseId.value = inferredCourseId;
@@ -94,7 +103,7 @@ const askTutor = async () => {
         courseId: requestCourseId,
         question: text,
         answerMode: mode.value === 'code' ? 'code_first' : mode.value === 'summary' ? 'summary' : 'step_by_step',
-        sessionId: answer.value?.sessionId || undefined,
+        sessionId: answerCourseId.value === requestCourseId ? answer.value?.sessionId : undefined,
       },
       (task) => {
         activeTaskId.value = task.task_id;
@@ -104,6 +113,7 @@ const askTutor = async () => {
     activeTaskId.value = result.taskId;
     taskProgress.value = 100;
     answer.value = result.answer;
+    answerCourseId.value = requestCourseId;
   } catch (error) {
     const message = error instanceof Error ? error.message : '智能辅导任务失败';
     errorMessage.value = message.includes('/tutor/chat 不可用')
@@ -119,14 +129,29 @@ const switchMode = (nextMode: typeof mode.value) => {
 };
 
 const startPractice = () => {
+  if (selectedCourse.value?.visibility === 'class') {
+    window.location.assign(`/quiz?course=${selectedCourse.value.id}`);
+    return;
+  }
   emit('navigate', 'quiz');
 };
+
+function changeCourse() {
+  explicitCourse.value = true;
+  answer.value = null;
+  activeTaskId.value = '';
+  errorMessage.value = '';
+}
 
 onMounted(async () => {
   try {
     const [courseRows, profileResult] = await Promise.all([getCourses(), getCurrentProfile().catch(() => null)]);
-    courses.value = courseRows.map((item) => ({ id: item.id, name: item.name }));
-    selectedCourseId.value = courseRows[0]?.id ?? null;
+    courses.value = learningCourses(courseRows);
+    const requested = requestedCourseId();
+    selectedCourseId.value = requested
+      ? courses.value.find((course) => course.id === requested)?.id ?? null
+      : courses.value[0]?.id ?? null;
+    if (requested && !selectedCourseId.value) errorMessage.value = '课程不存在或当前账号没有访问权限。';
     profile.value = profileResult?.profile ?? null;
   } catch {
     // Keep the page usable; askTutor will surface missing course/profile state.
@@ -135,17 +160,21 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="tutor-page ai-fluid-bg page-enter">
+  <div class="tutor-page ai-fluid-bg page-enter" :class="{ 'personal-mode': personalMode }">
     <section class="tutor-context">
       <h2>学习上下文</h2>
+      <button v-if="showPersonalPdf" class="context-card pdf-mode-button" type="button" @click="personalMode = !personalMode">
+        {{ personalMode ? '返回课程辅导' : '打开个人 PDF 辅导' }}
+      </button>
       <article class="context-card interactive-card">
         <span>当前课程</span>
-        <select v-model.number="selectedCourseId" class="course-select" aria-label="选择智能辅导课程">
+        <select v-model.number="selectedCourseId" class="course-select" aria-label="选择智能辅导课程" :disabled="loading" @change="changeCourse">
+          <option v-if="selectedCourseId === null" :value="null" disabled>选择课程</option>
           <option v-for="course in courses" :key="course.id" :value="course.id">
             {{ course.name }}
           </option>
         </select>
-        <small class="course-routing-note">系统会按问题关键词自动匹配课程，也可以在这里手动切换。</small>
+        <small v-if="!explicitCourse" class="course-routing-note">系统会按问题关键词自动匹配课程，也可以在这里手动切换。</small>
         <div class="context-divider"></div>
         <span>知识点</span>
         <em>{{ weakPoints[0] || '暂无画像薄弱点' }}</em>
@@ -167,7 +196,8 @@ onMounted(async () => {
       </article>
     </section>
 
-    <main class="tutor-answer-zone">
+    <PersonalPdfTutor v-if="personalMode && showPersonalPdf" />
+    <main v-else class="tutor-answer-zone">
       <header class="tutor-answer-head">
         <div class="agent-avatar" aria-hidden="true">
           <svg viewBox="0 0 32 32">
@@ -244,13 +274,13 @@ onMounted(async () => {
       </section>
 
       <form class="tutor-composer" @submit.prevent="askTutor">
-        <button type="button" aria-label="添加资料">+</button>
+        <button v-if="showPersonalPdf" type="button" aria-label="添加资料" @click="personalMode = true">+</button>
         <input v-model="question" :placeholder="questionPlaceholder" />
         <button class="send-button hover-scale" type="submit" :disabled="loading">➤</button>
       </form>
     </main>
 
-    <aside class="tutor-evidence">
+    <aside v-if="!personalMode" class="tutor-evidence">
       <h2>知识依据与推荐资源</h2>
       <article v-if="!answer?.evidence.length" class="evidence-card interactive-card">
         <span>RAG 证据</span>
@@ -261,9 +291,11 @@ onMounted(async () => {
         <strong>{{ item.title }}</strong>
         <p>{{ item.content || '已检索到课程知识库证据片段' }}</p>
         <small>{{ item.source || '课程知识库' }}</small>
+        <button v-if="item.documentId && item.page" type="button" @click="preview?.open(item.documentId, item.page, item.title)">查看 PDF 第 {{ item.page }} 页</button>
       </article>
       <small class="kb-note">基于课程知识库生成</small>
     </aside>
+    <CoursePdfPreview ref="preview" />
   </div>
 </template>
 
@@ -285,6 +317,9 @@ onMounted(async () => {
   gap: 22px;
   min-width: 0;
 }
+
+.personal-mode { grid-template-columns: 280px minmax(0, 1fr); }
+.pdf-mode-button { color: var(--color-ink); text-align: left; font: inherit; cursor: pointer; }
 
 .tutor-context h2,
 .tutor-evidence h2 {

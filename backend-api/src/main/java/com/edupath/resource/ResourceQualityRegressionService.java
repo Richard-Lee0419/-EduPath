@@ -3,6 +3,7 @@ package com.edupath.resource;
 import com.edupath.agenttask.AgentTaskService;
 import com.edupath.ai.AiAgentClient;
 import com.edupath.auth.AuthContext;
+import com.edupath.course.CourseAccess;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -24,23 +25,28 @@ public class ResourceQualityRegressionService {
     private final ResourceQualityMetricsService qualityMetricsService;
     private final ResourceQualityRepairRepository qualityRepairRepository;
     private final AiAgentClient aiAgentClient;
+    private final CourseAccess courseAccess;
 
     public ResourceQualityRegressionService(
             AgentTaskService agentTaskService,
             ResourceRepository resourceRepository,
             ResourceQualityMetricsService qualityMetricsService,
             ResourceQualityRepairRepository qualityRepairRepository,
-            AiAgentClient aiAgentClient) {
+            AiAgentClient aiAgentClient, CourseAccess courseAccess) {
         this.agentTaskService = agentTaskService;
         this.resourceRepository = resourceRepository;
         this.qualityMetricsService = qualityMetricsService;
         this.qualityRepairRepository = qualityRepairRepository;
         this.aiAgentClient = aiAgentClient;
+        this.courseAccess = courseAccess;
     }
 
     public AgentTaskService.TaskCreatedResponse createTask(QualityRegressionRequest request) {
         var principal = AuthContext.requirePrincipal();
         QualityRegressionRequest normalized = normalize(request);
+        if (normalized.courseId() != null) {
+            courseAccess.requireReadable(normalized.courseId());
+        }
         if (normalized.force() && "student".equals(principal.role())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "学生不能强制执行无告警回归");
         }
@@ -63,21 +69,19 @@ public class ResourceQualityRegressionService {
                         "QualityEvaluator", "正在使用当前确定性评测器重新评分", "已完成当前评测器复评"),
                 new AgentTaskService.AgentStepPlan(
                         "RegressionGuardAgent", "正在比较持久化基线并判定回归", "已输出只读回归结论"));
-        return agentTaskService.createObservableWorkflowTask(
+        List<ResourceRepository.ResourceRow> candidates = regressionCandidates(normalized);
+        return agentTaskService.createCourseWorkflowTask(
                 "quality_regression",
                 plans,
                 "quality_regression",
                 normalized,
-                progress -> executeRegression(normalized, alertCodes, progress));
+                candidates.stream().map(row -> (long) row.courseId()).distinct().toList(),
+                progress -> executeRegression(normalized, alertCodes, candidates, progress));
     }
 
-    private QualityRegressionResult executeRegression(
-            QualityRegressionRequest request,
-            List<String> alertCodes,
-            AgentTaskService.TaskProgress progress) {
-        progress.running("QualityMonitorAgent", "正在读取告警范围内的真实资源和质量快照", 12);
+    private List<ResourceRepository.ResourceRow> regressionCandidates(QualityRegressionRequest request) {
         Long ownerUserId = currentStudentOwnerId();
-        List<ResourceRepository.ResourceRow> candidates = resourceRepository.listQualityRegressionCandidates(
+        return resourceRepository.listQualityRegressionCandidates(
                         request.courseId(),
                         request.resourceType(),
                         request.generationMode(),
@@ -92,6 +96,14 @@ public class ResourceQualityRegressionService {
                         .thenComparing(ResourceRepository.ResourceRow::createdAt, Comparator.reverseOrder()))
                 .limit(request.maxResources())
                 .toList();
+    }
+
+    private QualityRegressionResult executeRegression(
+            QualityRegressionRequest request,
+            List<String> alertCodes,
+            List<ResourceRepository.ResourceRow> candidates,
+            AgentTaskService.TaskProgress progress) {
+        progress.running("QualityMonitorAgent", "正在读取告警范围内的真实资源和质量快照", 12);
         if (candidates.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "当前范围没有可重新评测的有效质量快照");
         }
@@ -101,6 +113,9 @@ public class ResourceQualityRegressionService {
         List<Map<String, Object>> results = new ArrayList<>();
         for (int index = 0; index < candidates.size(); index++) {
             ResourceRepository.ResourceRow row = candidates.get(index);
+            if ("teacher".equals(AuthContext.requirePrincipal().role()) && !courseAccess.canManage(row.courseId())) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "资源所属课程不可访问");
+            }
             results.add(aiAgentClient.regressResourceQuality(regressionPayload(row)));
             int itemProgress = 36 + (int) Math.round(((index + 1.0) / candidates.size()) * 42);
             progress.running(

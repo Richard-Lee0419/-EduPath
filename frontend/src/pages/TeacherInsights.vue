@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
+import TeachingCourseManager from '@/components/TeachingCourseManager.vue';
 import { getClassLearningInsights, listTeachingClasses } from '@/api/classInsight';
 import { createTeacherAssignment, getTeacherAssignmentProgress, listTeacherAssignments, publishTeacherAssignment } from '@/api/teacherAssignments';
 import type { ClassLearningInsights, TeachingClass } from '@/types/api';
@@ -116,7 +117,9 @@ const loadClasses = async () => {
   errorMessage.value = '';
   try {
     classes.value = await listTeachingClasses();
-    selectedClassId.value = classes.value[0]?.id ?? null;
+    if (!classes.value.some((item) => item.id === selectedClassId.value)) {
+      selectedClassId.value = classes.value[0]?.id ?? null;
+    }
     if (selectedClassId.value) await loadInsights();
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '班级列表加载失败';
@@ -169,10 +172,12 @@ onMounted(() => void loadClasses());
       </div>
     </header>
 
+    <TeachingCourseManager @class-updated="loadClasses" />
+
     <p v-if="loading && !insights" class="insight-state">正在聚合班级真实学习证据…</p>
     <p v-else-if="errorMessage" class="insight-state is-error">{{ errorMessage }}</p>
     <section v-else-if="!classes.length" class="insight-state">
-      当前账号还没有可管理班级，请先通过班级接口创建班级、绑定课程并添加学生。
+      当前账号还没有可管理班级，可在「班级与成员」中创建班级并添加学生。
     </section>
 
     <template v-else-if="insights">

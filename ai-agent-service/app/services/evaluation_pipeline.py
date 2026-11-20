@@ -53,7 +53,7 @@ class EvaluationPipeline:
         baseline = _validated_evaluation(baseline, request, baseline, evidence)
         calls: list[ModelCallRecord] = []
         report = baseline
-        if self.llm_gateway.is_configured:
+        if self.llm_gateway.is_configured and not request.local_only:
             report = self._analyze_with_model(request, baseline, evidence, calls)
 
         safety = self._review(request, report, evidence, calls)
@@ -137,7 +137,7 @@ class EvaluationPipeline:
         calls: list[ModelCallRecord],
     ) -> SafetyReview:
         local_review = self.safety_agent.review(str(report.model_dump()), evidence)
-        if not self.llm_gateway.is_configured:
+        if request.local_only or not self.llm_gateway.is_configured:
             return local_review
         validation_error = ""
         for attempt in range(2):
@@ -232,7 +232,10 @@ def _evidence_context(item: RagEvidence) -> dict[str, object]:
 
 
 def _resource_evidence(item: RagEvidence) -> ResourceEvidence:
-    return ResourceEvidence(chunk_id=item.chunk_id, title=item.title, content=item.content, score=item.score, source=item.source)
+    return ResourceEvidence(
+        chunk_id=item.chunk_id, title=item.title, content=item.content, score=item.score, source=item.source,
+        document_id=item.document_id, page=item.page,
+    )
 
 
 def _combine_reviews(local: SafetyReview, remote: SafetyReview) -> SafetyReview:

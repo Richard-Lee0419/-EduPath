@@ -78,11 +78,12 @@ public class AgentTaskController {
         List<AgentTaskService.AgentStepPlan> plans = resourcePlans(request.normalizedResourceTypes());
         List<String> plannedAgents = plans.stream().map(AgentTaskService.AgentStepPlan::agent).toList();
         Map<String, Object> profileSnapshot = profileService.currentProfileSnapshot();
-        return ApiResponse.success(agentTaskService.createObservableWorkflowTask(
+        return ApiResponse.success(agentTaskService.createCourseWorkflowTask(
                 "resource",
                 plans,
                 "resource_task",
                 request,
+                List.of((long) request.courseId()),
                 progress -> {
                     Map<String, String> observedStatuses = new HashMap<>();
                     AiAgentClient.AiResourceGenerateResult aiResult =
@@ -254,11 +255,12 @@ public class AgentTaskController {
                         "ResourcePlannerAgent", "正在绑定资源和测验任务", "已绑定学习资源"),
                 new AgentTaskService.AgentStepPlan(
                         "SafetyAgent", "正在检查路径建议是否合理", "SafetyAgent 审查通过"));
-        return ApiResponse.success(agentTaskService.createObservableWorkflowTask(
+        return ApiResponse.success(agentTaskService.createCourseWorkflowTask(
                 "path",
                 plans,
                 "path_generate",
                 request,
+                learningPathService.requestedCourseIds(request),
                 progress -> {
                     progress.running("ProfileAgent", "正在读取画像目标和薄弱点", 14);
                     progress.success("ProfileAgent", "已读取画像目标", 24);
@@ -274,6 +276,7 @@ public class AgentTaskController {
     }
 
     private ApiResponse<AgentTaskService.TaskCreatedResponse> retryTutorChat(TutorService.TutorChatRequest request) {
+        tutorService.validateChatAccess(request);
         var plans = List.of(
                 new AgentTaskService.AgentStepPlan(
                         "TutorAgent", "正在解析问题和回答模式", "已生成分步辅导方案"),
@@ -281,11 +284,12 @@ public class AgentTaskController {
                         "KnowledgeAgent", "正在检索课程证据", "已检索相关证据"),
                 new AgentTaskService.AgentStepPlan(
                         "SafetyAgent", "正在检查回答是否引用证据并避免误导", "SafetyAgent 审查通过"));
-        return ApiResponse.success(agentTaskService.createObservableWorkflowTask(
+        return ApiResponse.success(agentTaskService.createCourseWorkflowTask(
                 "tutor",
                 plans,
                 "tutor_chat",
                 request,
+                List.of(request.courseId() == null ? 1L : request.courseId().longValue()),
                 progress -> {
                     progress.running("TutorAgent", "正在解析问题和回答模式", 18);
                     progress.success("TutorAgent", "已解析问题和回答模式", 28);
@@ -302,16 +306,18 @@ public class AgentTaskController {
             throws JsonProcessingException {
         Map<?, ?> payload = objectMapper.readValue(requestPayload, Map.class);
         long documentId = Long.parseLong(String.valueOf(payload.get("document_id")));
-        roleGuard.requireCourseManager(knowledgeBaseService.documentCourseId(documentId));
+        long courseId = knowledgeBaseService.documentCourseId(documentId);
+        roleGuard.requireCourseManager(courseId);
         var plans = List.of(
                 new AgentTaskService.AgentStepPlan("KnowledgeAgent", "正在读取文档元数据", "已读取文档元数据"),
                 new AgentTaskService.AgentStepPlan("KnowledgeAgent", "正在重建向量索引", "已重建向量索引"),
                 new AgentTaskService.AgentStepPlan("SafetyAgent", "正在检查索引结果", "索引检查通过"));
-        var response = agentTaskService.createObservableWorkflowTask(
+        var response = agentTaskService.createCourseWorkflowTask(
                 "kb_index",
                 plans,
                 "kb_reindex",
                 Map.of("document_id", documentId),
+                List.of(courseId),
                 progress -> {
                     progress.running("KnowledgeAgent", "正在读取文档对象和元数据", 12);
                     progress.success("KnowledgeAgent", "已读取文档对象和元数据", 24);

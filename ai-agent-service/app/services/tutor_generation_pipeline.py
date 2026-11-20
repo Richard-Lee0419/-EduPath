@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from app.agents.knowledge_agent import KnowledgeAgent
 from app.agents.safety_agent import SafetyAgent
 from app.agents.tutor_agent import TutorAgent
+from app.rag.lexical_retrieval import has_query_overlap
 from app.rag.retriever import RagEvidence
 from app.schemas.resource_schema import ModelCallRecord, ModelRuntime, ResourceEvidence, SafetyReview
 from app.schemas.tutor_schema import TutorAnswerDraft, TutorChatRequest, TutorChatResponse, TutorCitation
@@ -41,18 +42,24 @@ class TutorGenerationPipeline:
             raise LLMGatewayError("question is empty after privacy de-identification")
 
         planned_agents = ["KnowledgeAgent", "TutorAgent", "SafetyAgent"]
-        evidence = self.knowledge_agent.retrieve(request.course_id, safe_question, top_k=5)
+        evidence = self.knowledge_agent.retrieve(
+            request.course_id, safe_question, top_k=5, require_relevance=request.local_only
+        )
         if not evidence:
             raise LLMGatewayError("KnowledgeAgent returned no evidence for tutor answer")
 
-        baseline = self.tutor_agent.answer(safe_question, request.answer_mode, evidence)
+        baseline = (
+            _evidence_only_fallback(request.answer_mode, evidence, safe_question)
+            if request.local_only
+            else self.tutor_agent.answer(safe_question, request.answer_mode, evidence)
+        )
         baseline = _validated_answer(baseline, evidence)
         calls: list[ModelCallRecord] = []
         answer = baseline
         safety_revision_rounds = 0
         generation_mode = "deterministic_fallback"
         safety = self.safety_agent.review(answer.answer_markdown, evidence)
-        if self.llm_gateway.is_configured:
+        if self.llm_gateway.is_configured and not request.local_only:
             try:
                 answer = self._answer_with_model(request, safe_question, baseline, evidence, calls)
                 generation_mode = "real_model"
@@ -346,16 +353,24 @@ def _evidence_only_fallback(
     first = _best_fallback_evidence(evidence, question)
     title = deidentify_text(first.title).strip() or deidentify_text(first.knowledge_point).strip()
     raw_excerpt = " ".join(deidentify_text(first.content).split())
+    if first.page is not None:
+        sentences = re.split(r"(?<=[。！？])|(?<=[.!?])\s+", raw_excerpt)
+        raw_excerpt = next((sentence for sentence in sentences if has_query_overlap(question, sentence)), raw_excerpt)
     excerpt = raw_excerpt[:220].strip(" ，。；;")
     if len(excerpt) < 4:
         excerpt = title[:220]
     if len(excerpt) < 4:
         excerpt = "当前课程证据仅支持有限结论"
 
+    limit = (
+        "资料未覆盖的内容暂不作推断。" if first.page is not None
+        else "证据未覆盖的例子、复杂度或实现细节暂不推断。"
+    )
+
     if answer_mode == "summary":
         answer_markdown = (
             f"课程证据《{title}》指出：{excerpt}。"
-            "本次仅保留证据直接支持的结论；证据未覆盖的例子、复杂度或实现细节不作推断。"
+            f"本次仅保留证据直接支持的结论。{limit}"
         )
         steps = ["阅读证据摘要", "对未覆盖内容保持保留"]
     elif answer_mode == "hint":
@@ -380,7 +395,7 @@ def _evidence_only_fallback(
         answer_markdown = (
             f"1. 先定位课程证据《{title}》。\n"
             f"2. 证据直接说明：{excerpt}。\n"
-            "3. 对证据未覆盖的例子、复杂度或实现细节暂不推断。"
+            f"3. {limit}"
         )
         steps = ["定位课程证据", "提取证据直接支持的结论", "标记证据限制"]
 
@@ -468,6 +483,8 @@ def _resource_evidence(item: RagEvidence) -> ResourceEvidence:
         content=item.content,
         score=item.score,
         source=item.source,
+        document_id=item.document_id,
+        page=item.page,
     )
 
 

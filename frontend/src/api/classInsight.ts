@@ -1,9 +1,18 @@
-import { apiGet } from './http';
+import { apiGet, apiPost } from './http';
 import type { ClassLearningInsights, TeachingClass } from '@/types/api';
 
 export function listTeachingClasses() {
   return apiGet<TeachingClass[]>('/classes');
 }
+
+export type ClassMember = { user_id: number; username: string; class_role: string };
+
+export const createTeachingClass = (name: string) => apiPost<{ class_info: TeachingClass }>('/classes', { name });
+
+export const listTeachingClassMembers = (classId: number) => apiGet<ClassMember[]>(`/classes/${classId}/members`);
+
+export const addTeachingClassStudent = (classId: number, username: string) =>
+  apiPost<ClassMember[]>(`/classes/${classId}/members`, { username, role: 'student' });
 
 export function getClassLearningInsights(
   classId: number,

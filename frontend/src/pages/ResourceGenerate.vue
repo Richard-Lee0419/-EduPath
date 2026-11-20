@@ -5,7 +5,8 @@ import RichContentRenderer from '../components/RichContentRenderer.vue';
 import DfsTraversalVisualizer from '../components/resource/DfsTraversalVisualizer.vue';
 import SplitText from '../components/SplitText.vue';
 import ResourceDetailRenderer from '../components/ResourceDetailRenderer.vue';
-import { getCourses } from '../api/course';
+import CoursePdfPreview from '../components/CoursePdfPreview.vue';
+import { getCourses, getKnowledgePoints, learningCourses, requestedCourseId } from '../api/course';
 import { getStoredUser } from '../api/auth';
 import { getCurrentProfile } from '../api/profile';
 import { generateResources, getResourceDetail, listResources, recordResourceInteraction, resourcesFromTask } from '../api/resource';
@@ -13,7 +14,7 @@ import { isAbortError, waitForAgentTask } from '../api/task';
 import { clearActiveTask, persistActiveTask, restoreActiveTask } from '../api/taskPersistence';
 import { observeExposure, shouldEmitExposure, track } from '../research';
 import type { AgentStatus, PageKey, Profile, ResourceCard } from '../types';
-import type { ModelRuntime, ResourceDetail } from '../types/api';
+import type { Course, KnowledgePoint, ModelRuntime, ResourceDetail } from '../types/api';
 
 const RESEARCH_PAGE = 'resource-generate';
 const RESOURCE_TASK_SCOPE = 'resource-generation';
@@ -67,8 +68,16 @@ const detailLoading = ref(false);
 const detailError = ref('');
 const selectedResource = ref<ResourceItem | null>(null);
 const selectedDetail = ref<ResourceDetail | null>(null);
-const courses = ref<Array<{ id: number; name: string }>>([]);
+const courses = ref<Course[]>([]);
 const selectedCourseId = ref<number | null>(null);
+const selectedCourse = computed(() => courses.value.find((course) => course.id === selectedCourseId.value));
+const classCourse = computed(() => selectedCourse.value?.visibility === 'class');
+const showCourseSelector = computed(() => courses.value.some((course) => course.visibility === 'class') || (courses.value.length > 0 && !selectedCourseId.value));
+const resourceTaskScope = computed(() => classCourse.value ? `${RESOURCE_TASK_SCOPE}:${selectedCourseId.value}` : RESOURCE_TASK_SCOPE);
+const courseTopics = ref<KnowledgePoint[]>([]);
+const selectedTopic = ref('');
+const switchingCourse = ref(false);
+const preview = ref<InstanceType<typeof CoursePdfPreview> | null>(null);
 const modelRuntime = ref<ModelRuntime | null>(null);
 const qualityRefreshToken = ref(0);
 const canManageResourceQuality = computed(() => ['teacher', 'admin'].includes(getStoredUser()?.role || ''));
@@ -116,8 +125,8 @@ const stages = ref<ResourceStage[]>([
 
 const resources = ref<ResourceItem[]>([]);
 
-const primaryWeakPoint = computed(() => profile.value?.weakPoints[0] || '');
-const selectedCourseName = computed(() => courses.value.find((course) => course.id === selectedCourseId.value)?.name || '');
+const primaryWeakPoint = computed(() => classCourse.value ? selectedTopic.value : profile.value?.weakPoints[0] || '');
+const selectedCourseName = computed(() => selectedCourse.value?.name || '');
 const course = computed(() => selectedCourseName.value || '课程加载中');
 const targetPoint = computed(() =>
   primaryWeakPoint.value ? `为“${primaryWeakPoint.value}”生成专项资源包` : '基于当前课程生成资源包',
@@ -361,12 +370,12 @@ const monitorResourceTask = async (taskId: string) => {
             taskRef: taskId,
             metadata: { task_id: taskId, status: snapshot.status, step: snapshot.current_agent || undefined },
           });
-          clearActiveTask(RESOURCE_TASK_SCOPE, taskId);
+          clearActiveTask(resourceTaskScope.value, taskId);
         }
       },
       { signal: controller.signal },
     );
-    clearActiveTask(RESOURCE_TASK_SCOPE, taskId);
+    clearActiveTask(resourceTaskScope.value, taskId);
     const result = resourcesFromTask(task);
     modelRuntime.value = result.modelRuntime ?? null;
     progress.value = 100;
@@ -414,7 +423,7 @@ const runGeneration = async () => {
       taskRef: created.taskId,
       metadata: { task_id: created.taskId, resource_types: selectedResourceTypes.value, difficulty: selectedDifficulty.value },
     });
-    persistActiveTask(RESOURCE_TASK_SCOPE, created.taskId);
+    persistActiveTask(resourceTaskScope.value, created.taskId);
     await monitorResourceTask(created.taskId);
   } catch (error) {
     if (isAbortError(error)) return;
@@ -424,16 +433,46 @@ const runGeneration = async () => {
   }
 };
 
+const refreshCourse = async () => {
+  switchingCourse.value = true;
+  selectedTopic.value = '';
+  courseTopics.value = [];
+  resources.value = [];
+  errorMessage.value = '';
+  activeTaskId.value = '';
+  resetStagesForTask();
+  try {
+    if (!selectedCourseId.value) return;
+    if (classCourse.value) {
+      courseTopics.value = await getKnowledgePoints(selectedCourseId.value);
+      selectedTopic.value = courseTopics.value[0]?.name ?? '';
+    }
+    await loadExistingResources();
+    const pendingTaskId = restoreActiveTask(resourceTaskScope.value);
+    if (pendingTaskId) void monitorResourceTask(pendingTaskId);
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '课程资源加载失败';
+  } finally {
+    switchingCourse.value = false;
+  }
+};
+
 onMounted(async () => {
   try {
     const [courseRows, profileResult] = await Promise.all([getCourses(), getCurrentProfile().catch(() => null)]);
-    courses.value = courseRows.map((item) => ({ id: item.id, name: item.name }));
-    selectedCourseId.value = courseRows[0]?.id ?? null;
+    courses.value = learningCourses(courseRows);
+    const requested = requestedCourseId();
+    selectedCourseId.value = requested
+      ? courses.value.find((course) => course.id === requested)?.id ?? null
+      : courses.value[0]?.id ?? null;
+    if (requested && !selectedCourseId.value) {
+      errorMessage.value = '课程不存在或当前账号没有访问权限。';
+      return;
+    }
     profile.value = profileResult?.profile ?? null;
-    const pendingTaskId = restoreActiveTask(RESOURCE_TASK_SCOPE);
-    if (pendingTaskId) void monitorResourceTask(pendingTaskId);
-  } finally {
-    void loadExistingResources();
+    await refreshCourse();
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '课程资源加载失败';
   }
 });
 
@@ -458,11 +497,18 @@ onUnmounted(() => {
         <div class="brief-columns">
           <div>
             <span>目标课程</span>
-            <strong>{{ course }}</strong>
+            <strong v-if="!showCourseSelector">{{ course }}</strong>
+            <select v-else v-model.number="selectedCourseId" aria-label="选择资源课程" :disabled="isGenerating || switchingCourse" @change="refreshCourse">
+              <option v-if="selectedCourseId === null" :value="null" disabled>选择课程</option>
+              <option v-for="item in courses" :key="item.id" :value="item.id">{{ item.name }}</option>
+            </select>
           </div>
           <div>
             <span>知识点目标</span>
-            <strong>{{ targetPoint }}</strong>
+            <select v-if="classCourse && courseTopics.length" v-model="selectedTopic" aria-label="选择资源知识点" :disabled="isGenerating || switchingCourse">
+              <option v-for="topic in courseTopics" :key="topic.id" :value="topic.name">{{ topic.name }}</option>
+            </select>
+            <strong v-else>{{ targetPoint }}</strong>
           </div>
           <div>
             <span>已识别薄弱点</span>
@@ -494,7 +540,7 @@ onUnmounted(() => {
             </select>
           </label>
         </div>
-        <button class="primary-action hover-scale" type="button" :disabled="isGenerating" @click="runGeneration">
+        <button class="primary-action hover-scale" type="button" :disabled="isGenerating || switchingCourse || !selectedCourseId" @click="runGeneration">
           {{ isGenerating ? '多智能体生成中' : '生成个性化资源包' }}
         </button>
         <details v-if="activeTaskId" class="technical-details">
@@ -654,12 +700,14 @@ onUnmounted(() => {
                 <strong>{{ item.title }}</strong>
                 <p>{{ item.content }}</p>
                 <small>{{ item.source }} · {{ Math.round(item.score * 100) }}%</small>
+                <button v-if="item.document_id && item.page" type="button" @click="preview?.open(item.document_id, item.page, item.title)">查看 PDF 第 {{ item.page }} 页</button>
               </article>
             </section>
           </template>
         </article>
       </div>
     </Teleport>
+    <CoursePdfPreview ref="preview" />
   </div>
 </template>
 

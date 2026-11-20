@@ -1,4 +1,5 @@
-import { apiGet, apiPost, apiUpload } from "./http";
+import { apiDelete, apiGet, apiGetBlob, apiPost, apiUpload } from "./http";
+import type { TaskCreated } from '@/types/api';
 
 export type KnowledgeCorpusSummary = {
   mode: 'course_corpus' | 'builtin_demo' | 'unknown';
@@ -26,6 +27,8 @@ export type KnowledgeSearchItem = {
   document_type: string;
   contains_examples: boolean;
   heading_path: string[];
+  document_id?: number;
+  page?: number;
 };
 
 export type KnowledgeSearchResult = {
@@ -44,30 +47,40 @@ export type KnowledgeDocumentUploadResult = {
   index_error: string;
 };
 
-export function uploadKnowledgeDocument(courseId: number, file: File) {
+export type KnowledgeDocument = {
+  id: number;
+  document_id?: number;
+  course_id: number;
+  filename: string;
+  parse_status: string;
+  index_status: string;
+  index_error?: string;
+  knowledge_point_id?: number;
+  storage_status?: string;
+  created_at?: string;
+};
+
+export function uploadKnowledgeDocument(courseId: number, file: File, knowledgePointId?: number) {
   const formData = new FormData();
   formData.append("courseId", String(courseId));
   formData.append("file", file);
-  return apiUpload<KnowledgeDocumentUploadResult>("/kb/upload", formData);
+  const path = knowledgePointId ? `/kb/upload?knowledgePointId=${knowledgePointId}` : '/kb/upload';
+  return apiUpload<KnowledgeDocumentUploadResult>(path, formData);
 }
 
-export function listKnowledgeDocuments(params: { courseId?: number; status?: string } = {}) {
-  return apiGet<
-    Array<{
-      id: number;
-      document_id?: number;
-      course_id: number;
-      filename: string;
-      parse_status: string;
-      index_status: string;
-      storage_status?: string;
-      created_at?: string;
-    }>
-  >("/kb/documents", {
+export async function listKnowledgeDocuments(params: { courseId?: number; status?: string } = {}) {
+  const rows = await apiGet<KnowledgeDocument[]>("/kb/documents", {
     courseId: params.courseId,
     status: params.status,
   });
+  return rows.map((row) => ({ ...row, id: row.document_id ?? row.id }));
 }
+
+export const getCoursePdf = (id: number) => apiGetBlob(`/kb/documents/${id}/content`);
+
+export const reindexKnowledgeDocument = (id: number) => apiPost<TaskCreated>(`/kb/documents/${id}/reindex`);
+
+export const deleteKnowledgeDocument = (id: number) => apiDelete(`/kb/documents/${id}`);
 
 export function searchKnowledgeBase(courseId: number, query: string, topK = 5) {
   return apiPost<KnowledgeSearchResult>("/kb/search", {

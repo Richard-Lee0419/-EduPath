@@ -6,7 +6,9 @@ import com.edupath.ai.AiAgentClient.KnowledgeDocumentPayload;
 import com.edupath.ai.AiAgentClient.KnowledgeIngestResult;
 import com.edupath.auth.AuthContext;
 import com.edupath.common.ExternalServiceException;
+import com.edupath.course.CourseAccess;
 import com.edupath.course.CourseCatalogService;
+import com.edupath.course.CourseRepository;
 import com.edupath.storage.ObjectStorageService;
 import com.edupath.storage.ObjectStorageService.SignedUrl;
 import com.edupath.storage.ObjectStorageService.StoredObject;
@@ -24,10 +26,13 @@ import org.springframework.web.server.ResponseStatusException;
 public class KnowledgeBaseService {
 
     private final CourseCatalogService courseCatalogService;
+    private final CourseRepository courses;
+    private final CourseAccess courseAccess;
     private final AiAgentClient aiAgentClient;
     private final ObjectStorageService objectStorageService;
     private final KnowledgeDocumentRepository knowledgeDocumentRepository;
     private final long maxUploadBytes;
+    private static final long CLASS_PDF_MAX_BYTES = 8 * 1024 * 1024;
 
     private static final Set<String> SUPPORTED_EXTENSIONS = Set.of("txt", "md", "markdown", "pdf", "docx", "pptx");
     private static final Set<String> SUPPORTED_MEDIA_TYPES = Set.of(
@@ -39,11 +44,15 @@ public class KnowledgeBaseService {
 
     public KnowledgeBaseService(
             CourseCatalogService courseCatalogService,
+            CourseRepository courses,
+            CourseAccess courseAccess,
             AiAgentClient aiAgentClient,
             ObjectStorageService objectStorageService,
             KnowledgeDocumentRepository knowledgeDocumentRepository,
             @Value("${edupath.kb.max-upload-bytes:20971520}") long maxUploadBytes) {
         this.courseCatalogService = courseCatalogService;
+        this.courses = courses;
+        this.courseAccess = courseAccess;
         this.aiAgentClient = aiAgentClient;
         this.objectStorageService = objectStorageService;
         this.knowledgeDocumentRepository = knowledgeDocumentRepository;
@@ -51,10 +60,22 @@ public class KnowledgeBaseService {
     }
 
     @Transactional(noRollbackFor = ExternalServiceException.class)
-    public DocumentUploadResult upload(long courseId, String filename, String contentType, byte[] content) {
+    public DocumentUploadResult upload(long courseId, String filename, String contentType, byte[] content,
+                                       Long knowledgePointId) {
         byte[] safeContent = content == null ? new byte[0] : content;
+        boolean classCourse = courseAccess.isClassCourse(courseId);
+        String topic = null;
+        if (classCourse) {
+            courses.lockClassCourse(courseId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "班级课程不存在"));
+            requireManager(courseId);
+            filename = validateClassPdf(filename, safeContent);
+            contentType = "application/pdf";
+            topic = topicName(courseId, knowledgePointId);
+        }
         validateUpload(filename, contentType, safeContent.length);
-        StoredObject storedObject = objectStorageService.store("knowledge-base", filename, contentType, safeContent);
+        StoredObject storedObject = objectStorageService.store(classCourse ? "class-course-pdfs" : "knowledge-base",
+                filename, contentType, safeContent);
         long documentId = knowledgeDocumentRepository.insert(
                 courseId,
                 filename == null || filename.isBlank() ? "untitled-document" : filename,
@@ -62,14 +83,16 @@ public class KnowledgeBaseService {
                 safeContent.length,
                 "pending",
                 storedObject.objectKey(),
-                storedObject.objectUrl(),
-                storedObject.storageStatus());
+                classCourse ? null : storedObject.objectUrl(),
+                storedObject.storageStatus(),
+                classCourse ? knowledgePointId : null);
         long jobId = knowledgeDocumentRepository.beginIndexJob(documentId, null, AuthContext.currentUsername());
         IngestOutcome outcome;
         try {
-            outcome = ingestDocument(documentId, courseId, filename, contentType, safeContent, storedObject.objectKey());
+            outcome = ingestDocument(documentId, courseId, filename, contentType, safeContent, storedObject.objectKey(),
+                    classCourse, knowledgePointId, topic);
         } catch (ExternalServiceException exception) {
-            knowledgeDocumentRepository.updateStatus(documentId, "failed", "failed");
+            knowledgeDocumentRepository.updateIndexState(documentId, "failed", "failed", failureMessage(exception));
             knowledgeDocumentRepository.finishIndexAttempt(jobId, null, "failed", failureMessage(exception));
             throw exception;
         }
@@ -80,10 +103,10 @@ public class KnowledgeBaseService {
                 outcome.indexStatus(),
                 storedObject.provider(),
                 storedObject.bucket(),
-                storedObject.objectKey(),
-                storedObject.objectUrl(),
+                classCourse ? null : storedObject.objectKey(),
+                classCourse ? null : storedObject.objectUrl(),
                 storedObject.storageStatus(),
-                signedUrl(storedObject.objectKey()),
+                classCourse ? null : signedUrl(storedObject.objectKey()),
                 outcome.safetyStatus(),
                 outcome.reason());
     }
@@ -92,6 +115,8 @@ public class KnowledgeBaseService {
         if (request == null) {
             request = new KnowledgeSearchRequest(1, courseCatalogService.normalizeCourseTopic(1), 5);
         }
+        int courseId = request.resolvedCourseId();
+        courseAccess.requireReadable(courseId);
         int topK = request.topK() == null ? 5 : Math.max(1, Math.min(request.topK(), 10));
         String query = request.query() == null || request.query().isBlank()
                 ? courseCatalogService.normalizeCourseTopic(request.resolvedCourseId())
@@ -106,6 +131,14 @@ public class KnowledgeBaseService {
                         .map(this::toSearchResult)
                         .toList()
                 : List.of();
+        if (courseAccess.isClassCourse(courseId)) {
+            var readableDocuments = knowledgeDocumentRepository.list((long) courseId, null).stream()
+                    .filter(KnowledgeDocumentRepository.DocumentRow::indexed)
+                    .map(KnowledgeDocumentRepository.DocumentRow::documentId).collect(java.util.stream.Collectors.toSet());
+            results = results.stream().filter(item -> item.courseId() == courseId
+                    && item.documentId() != null && readableDocuments.contains(item.documentId())).toList();
+            courseAccess.requireReadable(courseId);
+        }
         return new KnowledgeSearchResponse(
                 request.resolvedCourseId(),
                 query,
@@ -131,7 +164,31 @@ public class KnowledgeBaseService {
                 text(rawMap, "license_status", "licenseStatus"),
                 text(rawMap, "document_type", "documentType"),
                 bool(rawMap.get("contains_examples")),
-                stringList(rawMap.get("heading_path")));
+                stringList(rawMap.get("heading_path")),
+                rawMap.get("document_id") instanceof Number id ? id.longValue() : null,
+                rawMap.get("page") instanceof Number page ? page.intValue() : null);
+    }
+
+    private static String validateClassPdf(String filename, byte[] content) {
+        if (content.length > CLASS_PDF_MAX_BYTES) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "课程 PDF 不能超过 8 MiB");
+        }
+        String name = filename == null ? "" : filename.replace('\\', '/');
+        name = name.substring(name.lastIndexOf('/') + 1).replaceAll("[\\p{Cc}\\p{Cf}]", "").strip();
+        byte[] header = "%PDF-".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        if (name.length() <= 4 || name.length() > 255 || !name.toLowerCase(Locale.ROOT).endsWith(".pdf")
+                || content.length < header.length || java.util.Arrays.mismatch(content, 0, header.length,
+                        header, 0, header.length) != -1) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "请选择有效的课程 PDF 文件");
+        }
+        return name;
+    }
+
+    private String topicName(long courseId, Long topicId) {
+        if (topicId == null) return null;
+        return courses.listKnowledgePoints(courseId).stream().filter(point -> point.id() == topicId)
+                .map(CourseRepository.KnowledgePointRow::name).findFirst()
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "知识点不属于这门课程"));
     }
 
     private KnowledgeCorpusSummary toCorpusSummary(Object value) {
@@ -226,7 +283,16 @@ public class KnowledgeBaseService {
     }
 
     public List<KnowledgeDocumentRepository.DocumentRow> documents(Long courseId, String status) {
-        return knowledgeDocumentRepository.list(courseId, status);
+        if (courseId != null) courseAccess.requireReadable(courseId);
+        return knowledgeDocumentRepository.list(courseId, status).stream()
+                .map(this::visibleDocument).filter(java.util.Objects::nonNull).toList();
+    }
+
+    private KnowledgeDocumentRepository.DocumentRow visibleDocument(KnowledgeDocumentRepository.DocumentRow document) {
+        long courseId = document.courseId();
+        if (!courseAccess.isClassCourse(courseId)) return document;
+        if (courseAccess.canManage(courseId)) return document.protectedMetadata(true);
+        return document.indexed() && courseAccess.isReadable(courseId) ? document.protectedMetadata(false) : null;
     }
 
     @Transactional
@@ -246,7 +312,7 @@ public class KnowledgeBaseService {
         if (updated == 0) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "文档不存在: " + documentId);
         }
-        return knowledgeDocumentRepository.find(documentId).orElseThrow();
+        return visibleDocument(knowledgeDocumentRepository.find(documentId).orElseThrow());
     }
 
     @Transactional
@@ -262,8 +328,14 @@ public class KnowledgeBaseService {
     @Transactional(noRollbackFor = ExternalServiceException.class)
     public DocumentUploadResult reindexDocument(long documentId) {
         KnowledgeDocumentRepository.DocumentRow document = knowledgeDocumentRepository
-                .find(documentId)
+                .lock(documentId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "文档不存在: " + documentId));
+        requireManager(document.courseId());
+        boolean classCourse = courseAccess.isClassCourse(document.courseId());
+        if (classCourse) {
+            // Keep the current index usable if vector removal fails. A later parse must not serve stale excerpts.
+            aiAgentClient.deleteKnowledgeDocumentVectors(documentId, document.courseId());
+        }
         long jobId = knowledgeDocumentRepository.beginIndexJob(documentId, null, AuthContext.currentUsername());
         IngestOutcome outcome;
         try {
@@ -274,10 +346,13 @@ public class KnowledgeBaseService {
                 document.filename(),
                 document.contentType(),
                 content,
-                document.objectKey());
+                document.objectKey(),
+                classCourse,
+                document.knowledgePointId(),
+                classCourse ? topicName(document.courseId(), document.knowledgePointId()) : null);
         } catch (RuntimeException exception) {
             knowledgeDocumentRepository.deleteChunks(documentId);
-            knowledgeDocumentRepository.updateStatus(documentId, "failed", "failed");
+            knowledgeDocumentRepository.updateIndexState(documentId, "failed", "failed", failureMessage(exception));
             knowledgeDocumentRepository.finishIndexAttempt(jobId, null, "failed", failureMessage(exception));
             throw new ExternalServiceException("AI 服务", "文档重建索引失败", exception);
         }
@@ -291,10 +366,10 @@ public class KnowledgeBaseService {
                 outcome.indexStatus(),
                 objectStorageService.provider(),
                 objectStorageService.bucket(),
-                document.objectKey(),
-                document.objectUrl(),
+                classCourse ? null : document.objectKey(),
+                classCourse ? null : document.objectUrl(),
                 document.storageStatus(),
-                signedUrl(document.objectKey()),
+                classCourse ? null : signedUrl(document.objectKey()),
                 outcome.safetyStatus(),
                 outcome.reason());
     }
@@ -310,8 +385,26 @@ public class KnowledgeBaseService {
         KnowledgeDocumentRepository.DocumentRow document = knowledgeDocumentRepository
                 .find(documentId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "文档不存在: " + documentId));
+        if (courseAccess.isClassCourse(document.courseId())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "班级资料须在登录后打开原文");
+        }
         SignedUrl signed = objectStorageService.signedDownloadUrl(document.objectKey());
         return new DocumentDownloadUrl(document.documentId(), signed.url(), signed.expiresAt());
+    }
+
+    public CoursePdf openCoursePdf(long documentId) {
+        var document = knowledgeDocumentRepository.find(documentId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "PDF 资料不存在"));
+        if (!courseAccess.isClassCourse(document.courseId()) || visibleDocument(document) == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "PDF 资料不存在");
+        }
+        return new CoursePdf(document.filename(), objectStorageService.read(document.objectKey()));
+    }
+
+    private void requireManager(long courseId) {
+        if (!courseAccess.canManage(courseId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前角色无权管理该课程");
+        }
     }
 
     private SignedUrl signedUrl(String objectKey) {
@@ -324,14 +417,17 @@ public class KnowledgeBaseService {
             String filename,
             String contentType,
             byte[] content,
-            String objectKey) {
+            String objectKey,
+            boolean classCourse,
+            Long knowledgePointId,
+            String topic) {
         KnowledgeIngestResult result = aiAgentClient.ingestKnowledgeDocument(new KnowledgeDocumentPayload(
                 documentId,
                 (int) courseId,
                 filename == null || filename.isBlank() ? "untitled-document" : filename,
                 contentType,
                 content == null ? new byte[0] : content,
-                objectKey));
+                objectKey, classCourse ? knowledgePointId : null, topic, classCourse));
         if (result == null) {
             throw new ExternalServiceException("AI 服务", "知识库摄入未返回结果");
         }
@@ -340,7 +436,7 @@ public class KnowledgeBaseService {
                 && "passed".equalsIgnoreCase(result.safetyStatus());
         String reason = clean(result.indexError());
         if (!safetyPassed || !"indexed".equalsIgnoreCase(result.indexStatus()) || !reason.isEmpty()) {
-            if (!safetyPassed) {
+            if (!safetyPassed && !"not_reviewed".equals(result.safetyStatus())) {
                 List<String> issues = result.safety() == null || result.safety().issues() == null
                         ? List.of() : result.safety().issues();
                 String rejection = "SafetyAgent 审查未通过，未写入后端 chunk"
@@ -350,7 +446,7 @@ public class KnowledgeBaseService {
                 reason = "向量索引未完成，未写入后端 chunk";
             }
             knowledgeDocumentRepository.deleteChunks(documentId);
-            knowledgeDocumentRepository.updateStatus(documentId, parseStatus, "failed");
+            knowledgeDocumentRepository.updateIndexState(documentId, parseStatus, "failed", truncate(reason));
             return new IngestOutcome(result.taskId(), parseStatus, "failed", result.safetyStatus(),
                     safetyPassed ? "failed" : "rejected", truncate(reason));
         }
@@ -367,10 +463,7 @@ public class KnowledgeBaseService {
                     chunk.source(),
                     chunk.score());
         }
-        knowledgeDocumentRepository.updateStatus(
-                documentId,
-                parseStatus,
-                "indexed");
+        knowledgeDocumentRepository.updateIndexState(documentId, parseStatus, "indexed", null);
         return new IngestOutcome(result.taskId(), parseStatus, "indexed", result.safetyStatus(), "succeeded", "");
     }
 
@@ -392,7 +485,7 @@ public class KnowledgeBaseService {
     @Transactional
     public void deleteDocument(long documentId) {
         KnowledgeDocumentRepository.DocumentRow document = knowledgeDocumentRepository
-                .find(documentId)
+                .lock(documentId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "文档不存在: " + documentId));
         aiAgentClient.deleteKnowledgeDocumentVectors(document.documentId(), document.courseId());
         knowledgeDocumentRepository.deleteChunks(documentId);
@@ -440,7 +533,9 @@ public class KnowledgeBaseService {
             String licenseStatus,
             String documentType,
             boolean containsExamples,
-            List<String> headingPath) {}
+            List<String> headingPath,
+            Long documentId,
+            Integer page) {}
 
     public record DocumentUploadResult(
             long documentId,
@@ -456,6 +551,8 @@ public class KnowledgeBaseService {
             String indexError) {}
 
     public record DocumentDownloadUrl(long documentId, String url, java.time.OffsetDateTime expiresAt) {}
+
+    public record CoursePdf(String filename, byte[] content) {}
 
     public record DocumentStatusUpdateRequest(String parseStatus, String indexStatus) {}
 }

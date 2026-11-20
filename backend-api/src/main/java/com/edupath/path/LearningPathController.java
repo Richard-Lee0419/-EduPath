@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -37,11 +38,12 @@ public class LearningPathController {
                         "PathAgent", "正在生成按天学习路径", "已生成学习路径草案"),
                 new AgentTaskService.AgentStepPlan(
                         "SafetyAgent", "正在检查路径建议是否合理", "SafetyAgent 审查通过"));
-        return ApiResponse.success(agentTaskService.createObservableWorkflowTask(
+        return ApiResponse.success(agentTaskService.createCourseWorkflowTask(
                 "path",
                 plans,
                 "path_generate",
                 request,
+                learningPathService.requestedCourseIds(request),
                 progress -> {
                     progress.running("ProfileAgent", "正在读取画像目标和薄弱点", 14);
                     progress.success("ProfileAgent", "已读取画像目标", 24);
@@ -56,21 +58,23 @@ public class LearningPathController {
 
     @GetMapping("/current")
     @Operation(summary = "查询当前学习路径")
-    public ApiResponse<Map<String, Object>> current() {
-        return ApiResponse.success(learningPathService.currentPath());
+    public ApiResponse<Map<String, Object>> current(@RequestParam(name = "course_id", required = false) Integer courseId) {
+        return ApiResponse.success(learningPathService.currentPath(courseId));
     }
 
     @GetMapping("/adjustment-signal")
     @Operation(summary = "查询行为驱动的路径调整判定")
-    public ApiResponse<Map<String, Object>> adjustmentSignal() {
-        return ApiResponse.success(learningPathService.adjustmentSignal());
+    public ApiResponse<Map<String, Object>> adjustmentSignal(
+            @RequestParam(name = "course_id", required = false) Integer courseId) {
+        return ApiResponse.success(learningPathService.adjustmentSignal(courseId));
     }
 
     @PostMapping("/replan/behavior")
     @Operation(summary = "根据确定性行为信号创建受控路径重规划任务")
-    public ApiResponse<BehaviorReplanTaskResponse> replanFromBehavior() {
+    public ApiResponse<BehaviorReplanTaskResponse> replanFromBehavior(
+            @RequestParam(name = "course_id", required = false) Integer courseId) {
         LearningPathService.BehaviorReplanPreparation preparation =
-                learningPathService.prepareBehaviorReplan();
+                learningPathService.prepareBehaviorReplan(courseId);
         List<AgentTaskService.AgentStepPlan> plans = List.of(
                 new AgentTaskService.AgentStepPlan(
                         "BehaviorSignalAgent", "正在复核确定性行为触发条件", "行为触发条件复核通过"),
@@ -83,7 +87,7 @@ public class LearningPathController {
                 new AgentTaskService.AgentStepPlan(
                         "SafetyAgent", "正在复核证据、时间预算与调整范围", "SafetyAgent 审查通过"));
         AgentTaskService.IdempotentTaskCreatedResponse created =
-                agentTaskService.createIdempotentObservableWorkflowTask(
+                agentTaskService.createIdempotentCourseWorkflowTask(
                         "path",
                         preparation.triggerKey(),
                         plans,
@@ -93,6 +97,7 @@ public class LearningPathController {
                                 "path_id", preparation.pathId(),
                                 "path_version", preparation.pathVersion(),
                                 "signal", preparation.signal()),
+                        preparation.courseIds(),
                         progress -> {
                             progress.running("BehaviorSignalAgent", "正在复核确定性行为触发条件", 10);
                             progress.success("BehaviorSignalAgent", "行为触发条件复核通过", 20);
@@ -113,8 +118,9 @@ public class LearningPathController {
 
     @PostMapping("/nodes/{day}/complete")
     @Operation(summary = "完成当前路径中的学习节点")
-    public ApiResponse<Map<String, Object>> completeNode(@PathVariable int day) {
-        return ApiResponse.success(learningPathService.completeDay(day));
+    public ApiResponse<Map<String, Object>> completeNode(
+            @PathVariable int day, @RequestParam(name = "course_id", required = false) Integer courseId) {
+        return ApiResponse.success(learningPathService.completeDay(day, courseId));
     }
 
     public record BehaviorReplanTaskResponse(

@@ -14,6 +14,7 @@ class QuizGenerateRequest(BaseModel):
     difficulty: Difficulty = "basic"
     question_count: int = Field(default=3, ge=1, le=3)
     student_profile: dict[str, object] = Field(default_factory=dict)
+    local_only: bool = False
 
 
 class QuizQuestionDraft(BaseModel):

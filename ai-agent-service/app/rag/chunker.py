@@ -33,6 +33,7 @@ class RagChunk:
     language: str = ""
     contains_examples: bool = False
     document_id: int | None = None
+    page: int | None = None
 
 
 def uploaded_chunk_id_prefix(document_id: int) -> str:
@@ -59,15 +60,19 @@ class Chunker:
             )
         return chunks
 
-    def chunk_uploaded_document(self, document: SourceDocument, document_id: int) -> list[RagChunk]:
+    def chunk_uploaded_document(
+        self, document: SourceDocument, document_id: int, *, page: int | None = None
+    ) -> list[RagChunk]:
+        id_prefix = uploaded_chunk_id_prefix(document_id).rstrip("_")
         return self._chunk_document(
             document,
-            id_prefix=uploaded_chunk_id_prefix(document_id).rstrip("_"),
+            id_prefix=f"{id_prefix}_p{page}" if page is not None else id_prefix,
             document_id=document_id,
+            page=page,
         )
 
     def _chunk_document(
-        self, document: SourceDocument, id_prefix: str, document_id: int | None = None
+        self, document: SourceDocument, id_prefix: str, document_id: int | None = None, page: int | None = None
     ) -> list[RagChunk]:
         specs = self.semantic_chunker.split(document.title, document.content)
         chunk_ids = [f"{id_prefix}_{index}" for index in range(1, len(specs) + 1)]
@@ -103,6 +108,7 @@ class Chunker:
                     language=document.language,
                     contains_examples=document.contains_examples or "example" in spec.roles or "exercise" in spec.roles,
                     document_id=document_id,
+                    page=page,
                 )
             )
         return chunks

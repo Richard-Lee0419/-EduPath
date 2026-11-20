@@ -23,6 +23,7 @@ class ResourceGenerateRequest(BaseModel):
     resource_types: list[ResourceType]
     difficulty: Difficulty = "medium"
     student_profile: dict[str, object] = Field(default_factory=dict)
+    local_only: bool = False
 
 
 class ResourceEvidence(BaseModel):
@@ -31,6 +32,8 @@ class ResourceEvidence(BaseModel):
     content: str
     score: float
     source: str
+    document_id: int | None = None
+    page: int | None = None
 
 
 class SafetyReview(BaseModel):
@@ -137,6 +140,7 @@ class ResourceRepairRequest(BaseModel):
     current_evaluation: ResourceQualityEvaluation
     regressed_dimensions: list[str] = Field(default_factory=list)
     expected_difficulty: Difficulty
+    local_only: bool = False
 
 
 class ResourceRepairResponse(BaseModel):

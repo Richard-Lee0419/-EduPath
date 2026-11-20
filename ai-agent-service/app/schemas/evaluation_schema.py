@@ -33,6 +33,7 @@ class EvaluationAnalyzeRequest(BaseModel):
     score: int = Field(ge=0, le=100)
     question_results: list[QuizQuestionResult] = Field(min_length=1, max_length=3)
     student_profile: dict[str, object] = Field(default_factory=dict)
+    local_only: bool = False
 
 
 class KnowledgeMasteryResult(BaseModel):

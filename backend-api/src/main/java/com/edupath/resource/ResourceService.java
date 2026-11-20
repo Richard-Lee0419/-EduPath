@@ -4,8 +4,8 @@ import com.edupath.ai.AiAgentClient.AiGeneratedResource;
 import com.edupath.ai.AiAgentClient.AiResourceGenerateResult;
 import com.edupath.ai.AiAgentClient.AiSafety;
 import com.edupath.auth.AuthContext;
-import com.edupath.auth.UserRepository;
 import com.edupath.common.ExternalServiceException;
+import com.edupath.course.CourseAccess;
 import com.edupath.course.CourseCatalogService;
 import com.edupath.learning.LearningEventService;
 import com.edupath.learning.LearningEventService.LearningEventCommand;
@@ -31,19 +31,19 @@ public class ResourceService {
     private final ObjectStorageService objectStorageService;
     private final ResourceRepository resourceRepository;
     private final LearningEventService learningEventService;
-    private final UserRepository userRepository;
+    private final CourseAccess courseAccess;
 
     public ResourceService(
             CourseCatalogService courseCatalogService,
             ObjectStorageService objectStorageService,
             ResourceRepository resourceRepository,
             LearningEventService learningEventService,
-            UserRepository userRepository) {
+            CourseAccess courseAccess) {
         this.courseCatalogService = courseCatalogService;
         this.objectStorageService = objectStorageService;
         this.resourceRepository = resourceRepository;
         this.learningEventService = learningEventService;
-        this.userRepository = userRepository;
+        this.courseAccess = courseAccess;
     }
 
     public ResourceListResponse listResources(Integer courseId, String type, int page, int size) {
@@ -157,6 +157,7 @@ public class ResourceService {
 
     @Transactional
     public ResourceBatchResult generateFromTask(ResourceTaskRequest request, AiResourceGenerateResult aiResult) {
+        courseAccess.requireReadable(request.courseId());
         if (aiResult == null || aiResult.resources() == null || aiResult.resources().isEmpty()) {
             throw new ExternalServiceException("AI 服务", "资源生成结果为空，已停止写入资源记录");
         }
@@ -166,7 +167,7 @@ public class ResourceService {
         List<EvidenceRef> evidence = (aiResult.evidence() == null ? List.<com.edupath.ai.AiAgentClient.AiEvidence>of()
                 : aiResult.evidence()).stream()
                 .map(item -> new EvidenceRef(
-                        item.chunkId(), item.title(), item.content(), item.score(), item.source()))
+                        item.chunkId(), item.title(), item.content(), item.score(), item.source(), item.documentId(), item.page()))
                 .toList();
         SafetyReview safety = new SafetyReview(
                 aiResult.safety().passed(),
@@ -278,20 +279,28 @@ public class ResourceService {
 
     public ResourceDownloadUrl downloadUrl(String resourceId) {
         ResourceRepository.ResourceRow row = readableResource(resourceId);
+        if (courseAccess.isClassCourse(row.courseId())) {
+            return new ResourceDownloadUrl(row.resourceId(), "/api/resources/" + row.resourceId() + "/content", null);
+        }
         SignedUrl signed = objectStorageService.signedDownloadUrl(row.objectKey());
         return new ResourceDownloadUrl(row.resourceId(), signed.url(), signed.expiresAt());
+    }
+
+    ResourceDownload download(String resourceId) {
+        ResourceRepository.ResourceRow row = readableResource(resourceId);
+        return new ResourceDownload(row.resourceId() + "." + extensionFor(row.contentFormat()),
+                (row.content() == null ? "" : row.content()).getBytes(StandardCharsets.UTF_8));
     }
 
     private ResourceRepository.ResourceRow readableResource(String resourceId) {
         ResourceRepository.ResourceRow row = resourceRepository.find(resourceId)
                 .filter(item -> !"deleted".equals(item.status()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "资源不存在: " + resourceId));
+        courseAccess.requireReadable(row.courseId());
         var principal = AuthContext.current();
         boolean published = "published".equals(row.status());
         boolean globalPublished = row.ownerUserId() <= 0 && published;
-        boolean manager = principal != null && ("admin".equals(principal.role())
-                || ("teacher".equals(principal.role())
-                    && userRepository.hasCourseRole(principal.userId(), row.courseId())));
+        boolean manager = courseAccess.canManage(row.courseId(), principal);
         boolean owner = principal != null && row.ownerUserId() > 0 && row.ownerUserId() == principal.userId();
         if (globalPublished || manager || (owner && published)) {
             return row;
@@ -416,12 +425,15 @@ public class ResourceService {
     }
 
     private EvidenceRef toEvidence(Map<String, Object> map) {
+        Object document = map.getOrDefault("document_id", map.get("documentId"));
         return new EvidenceRef(
                 text(map, "chunk_id", "chunkId"),
                 text(map, "title"),
                 text(map, "content"),
                 score(map.get("score")),
-                text(map, "source"));
+                text(map, "source"),
+                document instanceof Number id ? id.longValue() : null,
+                map.get("page") instanceof Number page ? page.intValue() : null);
     }
 
     private SafetyReview toSafety(Map<String, Object> map) {
@@ -545,7 +557,8 @@ public class ResourceService {
             Map<String, Object> qualityEvaluation,
             String generationMode) {}
 
-    public record EvidenceRef(String chunkId, String title, String content, double score, String source) {}
+    public record EvidenceRef(String chunkId, String title, String content, double score, String source,
+                              Long documentId, Integer page) {}
 
     public record SafetyReview(
             boolean passed,
@@ -579,6 +592,8 @@ public class ResourceService {
     public record ResourceVersionsResponse(List<ResourceRepository.ResourceVersionRow> items) {}
 
     public record ResourceDownloadUrl(String resourceId, String url, OffsetDateTime expiresAt) {}
+
+    record ResourceDownload(String filename, byte[] bytes) {}
 
     public record ResourceAccess(int courseId, long ownerUserId) {}
 }

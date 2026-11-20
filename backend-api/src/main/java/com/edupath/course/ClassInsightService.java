@@ -16,14 +16,17 @@ public class ClassInsightService {
     private final ClassRepository classRepository;
     private final ClassInsightRepository insightRepository;
     private final RoleGuard roleGuard;
+    private final CourseAccess courseAccess;
 
     public ClassInsightService(
             ClassRepository classRepository,
             ClassInsightRepository insightRepository,
-            RoleGuard roleGuard) {
+            RoleGuard roleGuard,
+            CourseAccess courseAccess) {
         this.classRepository = classRepository;
         this.insightRepository = insightRepository;
         this.roleGuard = roleGuard;
+        this.courseAccess = courseAccess;
     }
 
     public ClassInsightResponse insights(long classId, Long courseId, int windowDays) {
@@ -41,25 +44,27 @@ public class ClassInsightService {
                 .findFirst()
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "所选课程未绑定到该班级"));
         roleGuard.requireCourseManager(selectedCourseId);
+        boolean classCourse = courseAccess.isClassCourse(selectedCourseId);
 
         int normalizedWindow = Math.max(7, Math.min(windowDays, 90));
         OffsetDateTime generatedAt = OffsetDateTime.now(ZoneOffset.ofHours(8));
         OffsetDateTime since = generatedAt.minusDays(normalizedWindow);
         List<ClassInsightRepository.StudentInsightRow> rows =
-                insightRepository.students(classId, selectedCourseId, since);
+                insightRepository.students(classId, selectedCourseId, since, classCourse);
         List<StudentRisk> students = rows.stream()
                 .map(this::studentRisk)
                 .sorted(Comparator.comparingInt((StudentRisk item) -> riskRank(item.riskLevel()))
                         .thenComparing(StudentRisk::username))
                 .toList();
         List<ClassInsightRepository.WeakKnowledgeRow> weakPoints =
-                insightRepository.weakKnowledgePoints(classId, selectedCourseId);
+                insightRepository.weakKnowledgePoints(classId, selectedCourseId, classCourse);
         List<ClassInsightRepository.ActivityTrendRow> trend =
                 insightRepository.activityTrend(classId, selectedCourseId, since);
         InsightSummary summary = summary(rows, students, trend);
         return new ClassInsightResponse(
                 new InsightSource(
-                        "class_members + learning_events + knowledge_mastery + quiz_attempts + resource_interactions",
+                        "class_members + learning_events + " + (classCourse ? "class_course_mastery" : "knowledge_mastery")
+                                + " + quiz_attempts + resource_interactions",
                         normalizedWindow,
                         since,
                         generatedAt),

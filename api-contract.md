@@ -209,6 +209,21 @@ SSE 连接也支持 `access_token` 查询参数，用于浏览器 `EventSource` 
 ]
 ```
 
+课程记录包含 `visibility`（`public` 或 `class`）和 `status`。公开课程保留原访问方式。班级课程只出现在教师本人管理的课程列表、管理员列表和选课班级内学生的目录中。学生只看到已发布、班级和成员关系均有效的课程。
+
+### 教师班级课程 `/api/teaching-courses`
+
+教师在自己负责的班级开课，管理员可协助管理。新课在正式课程目录使用真实 `course_id`，知识库、智能辅导、资源生成、测验、学习路径共享这个 ID。
+
+| 方法及路径 | 请求或作用 |
+| --- | --- |
+| GET `/api/teaching-courses` | 查询当前教师管理的班级课程，包括草稿和已撤下课程 |
+| POST `/api/teaching-courses` | `{name, description, topics: string[]}`，创建草稿，设置 1–30 个唯一知识点 |
+| PATCH `/api/teaching-courses/{id}` | 更新已提供的名称、简介或知识点；保留原名知识点 ID，有资料的知识点需先处理其资料才能移除 |
+| PUT `/api/teaching-courses/{id}/publication` | `{class_ids: number[], published: boolean}`；发布时至少选择一个有效班级且有一份索引成功的 PDF；撤下和重新发布复用课程 ID |
+
+创建、修改和发布返回 `id`、`code`、`name`、`description`、`status`、`class_ids`、`topics`（每项含 `id` 和 `name`）。状态为 `draft`、`active` 或 `archived`。班级和学生从现有班级成员关系读取，多个班级可绑定同一门课，无需逐个分配课程。教师可以用 `POST /api/classes` 建立班级，用 `POST /api/classes/{classId}/members` 的 `{username, role: "student"}` 添加已注册学生，原 `user_id` 入参继续可用。
+
 ### GET `/api/courses/{courseId}/knowledge-points`
 
 返回课程知识点树。
@@ -346,6 +361,10 @@ SSE 连接也支持 `access_token` 查询参数，用于浏览器 `EventSource` 
 说明：`storage_provider=local` 时，后端会把上传内容写入 `edupath.storage.local-root` 下的对象路径，并返回本地签名下载链接；`storage_provider=oss` 时，后端通过阿里云 OSS SDK 上传、读取、删除并生成签名下载 URL。上传后 Java 后端调用 AI 服务 `/kb/ingest`，依次执行解析、切分、Safety 审查和向量替换。
 
 上传响应包含 `safety_status`（`passed` 或 `review_required`）和 `index_error`。Safety 拒绝或索引写入失败时保留失败文档、存储对象及索引任务记录，返回 `index_status=failed`，不写后端 chunk；调用方必须检查状态，不能仅凭 HTTP 成功提示“已入库”。技术错误与拒绝原因进入 `index_error`，可供课程管理者诊断和重试。AI 服务拒绝重建时撤回该文档已有向量；撤回失败明确报告错误。
+
+班级课程接受最多 8 MiB、100 个物理页、50 万提取字符的未加密文本 PDF；可选上传参数 `knowledgePointId` 绑定本课程知识点。解析未通过时状态为 `failed`，可以检查原因、移除文件或重建索引。`GET /api/kb/documents` 在班级范围内向学生返回已通过解析和索引的文档，教师可看失败状态和原因。班级文档记录与上传响应省略对象存储链接及对象键。
+
+`GET /api/kb/documents/{documentId}/content` 在每次请求检查登录态、课程及文档权限后返回 `application/pdf` 原文，并设置 `Cache-Control: no-store`。知识库和辅导的 PDF 证据可包含 `document_id` 和 `page`，前端在获取原文后按从 1 开始的物理页定位。班级文档只有这个受控入口，旧签名下载 URL 接口对其不适用。班级课程的教学检索限于本课程，教学处理在本地进行，课程 PDF 片段不发送给外部模型。
 
 ### GET `/api/kb/documents`
 
@@ -1194,6 +1213,8 @@ AI 服务只向外部模型发送去标识化画像维度和本次检索的课�
 
 获取当前学习路径。
 
+可传 `course_id` 读取单门班级课程的最新路径。`GET /api/path/adjustment-signal`、`POST /api/path/replan/behavior`、`POST /api/path/nodes/{day}/complete` 支持同一查询参数，供课程入口维持当前范围。`GET /api/evaluation/report?course_id={courseId}` 返回该班级课程的评估，班级课程的测验与掌握度单独记录。
+
 响应 `data`：
 
 ```json
@@ -1382,6 +1403,24 @@ AI 服务只向外部模型发送去标识化画像维度和本次检索的课�
 ```
 
 `citations[].answer_fragment` 必须逐字存在于 `answer_markdown`，其 `evidence_chunk_ids` 必须来自本次真实检索结果。首次提问只记录 `tutor_question` 审计事件；携带本人同课程 `session_id` 的有效追问记录轻量掌握度证据。模型错误或修订后审核仍失败时，AI 可返回仅摘录证据的 `deterministic_fallback`，包括已配置模型的环境；回退同样接受引用和 Safety 检查。最终输出结构、引用、隐私或 Safety 不合格时任务失败，不创建会话或保存助手回答。运行记录保留已发生的模型调用，回退不能伪装成真实模型回答。
+
+切换课程时省略 `session_id`，创建对应课程的新会话。请求携带无权访问的会话返回 403，会话不存在返回 404，课程不匹配返回 400。此类请求在创建任务和调用模型前拒绝。
+
+### 学生个人 PDF 辅导 `/api/tutor/personal-pdfs`
+
+仅学生可操作。服务端从登录态取所有者 ID，检索前限定到指定的本人文档。个人 PDF 与原文页文本保存在应用数据库中，辅导使用应用内的检索和 SafetyAgent 校验。个人资料、问题和答案不会提交给外部模型或写入公共知识库、课程掌握度和辅导历史。
+
+| 方法 | 路径 | 请求与响应 `data` |
+| --- | --- | --- |
+| GET | `/api/tutor/personal-pdfs` | 返回资料数组，字段 `id`、`filename`、`page_count`、`uploaded_at` |
+| POST | `/api/tutor/personal-pdfs` | `multipart/form-data` 的 `file` 字段。解析成功后返回该资料 |
+| POST | `/api/tutor/personal-pdfs/{id}/ask` | JSON `question`，2–500 字符。返回 `outcome`、`guidance`、`evidence` |
+| GET | `/api/tutor/personal-pdfs/{id}/content` | 成功时返回原始 `application/pdf`，不经过 JSON 包装，禁止缓存 |
+| DELETE | `/api/tutor/personal-pdfs/{id}` | 删除选定资料、解析页和原始文件，返回 `data.deleted: true` |
+
+`outcome` 为 `answered`、`insufficient_evidence` 或 `review_required`。回答使用可核对的资料摘录和学习提示。`evidence[]` 包含 `page` 和 `excerpt`，`page` 是从 1 开始的 PDF 物理页，前端在通过鉴权取得原文件后用 `#page={page}` 打开原页。证据不足或未通过 SafetyAgent 时 `evidence` 为空。以上操作在有限的文档范围内同步执行。
+
+首版支持 8 MiB、100 页以内的单份未加密、可提取文本的 PDF，每账号最多保留 10 份。无效、扫描版、加密或超出解析限额的文档返回 422 并允许更换文件。超过文件大小返回 413，资料数量已满返回 409。指定资料不存在、已删除或属于其他账号时返回 404。
 
 ## 10. 测试与评估接口
 

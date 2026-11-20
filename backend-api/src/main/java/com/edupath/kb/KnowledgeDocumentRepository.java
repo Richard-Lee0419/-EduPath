@@ -28,14 +28,15 @@ public class KnowledgeDocumentRepository {
             String parseStatus,
             String objectKey,
             String objectUrl,
-            String storageStatus) {
+            String storageStatus,
+            Long knowledgePointId) {
         var keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             var statement = connection.prepareStatement("""
                 INSERT INTO knowledge_documents (
                     course_id, filename, content_type, size, parse_status, index_status,
-                    object_key, object_url, storage_status, uploaded_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, 'not_indexed', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    object_key, object_url, storage_status, knowledge_point_id, uploaded_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 'not_indexed', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """, new String[] {"document_id"});
             statement.setLong(1, courseId);
             statement.setString(2, filename);
@@ -45,6 +46,7 @@ public class KnowledgeDocumentRepository {
             statement.setString(6, objectKey);
             statement.setString(7, objectUrl);
             statement.setString(8, storageStatus);
+            statement.setObject(9, knowledgePointId);
             return statement;
         }, keyHolder);
         return keyHolder.getKey().longValue();
@@ -89,6 +91,32 @@ public class KnowledgeDocumentRepository {
                         documentId)
                 .stream()
                 .findFirst();
+    }
+
+    Optional<DocumentRow> lock(long documentId) {
+        return jdbcTemplate.query("SELECT * FROM knowledge_documents WHERE document_id = ? AND deleted_at IS NULL FOR UPDATE",
+                this::mapRow, documentId).stream().findFirst();
+    }
+
+    public boolean hasTopicDocuments(long courseId, long topicId) {
+        return Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM knowledge_documents
+                WHERE course_id = ? AND knowledge_point_id = ? AND deleted_at IS NULL)
+                """, Boolean.class, courseId, topicId));
+    }
+
+    public boolean hasIndexedPdf(long courseId) {
+        return Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM knowledge_documents WHERE course_id = ? AND deleted_at IS NULL
+                    AND content_type = 'application/pdf' AND parse_status = 'parsed' AND index_status = 'indexed')
+                """, Boolean.class, courseId));
+    }
+
+    void updateIndexState(long documentId, String parseStatus, String indexStatus, String error) {
+        jdbcTemplate.update("""
+                UPDATE knowledge_documents SET parse_status = ?, index_status = ?, index_error = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE document_id = ? AND deleted_at IS NULL
+                """, parseStatus, indexStatus, error, documentId);
     }
 
     public int updateStatus(long documentId, String parseStatus, String indexStatus) {
@@ -215,7 +243,9 @@ public class KnowledgeDocumentRepository {
                 rs.getString("object_url"),
                 rs.getString("storage_status"),
                 toOffsetDateTime(rs.getTimestamp("uploaded_at")),
-                toOffsetDateTime(rs.getTimestamp("updated_at")));
+                toOffsetDateTime(rs.getTimestamp("updated_at")),
+                rs.getObject("knowledge_point_id", Long.class),
+                rs.getString("index_error"));
     }
 
     private OffsetDateTime toOffsetDateTime(Timestamp timestamp) {
@@ -234,7 +264,18 @@ public class KnowledgeDocumentRepository {
             String objectUrl,
             String storageStatus,
             OffsetDateTime uploadedAt,
-            OffsetDateTime updatedAt) {}
+            OffsetDateTime updatedAt,
+            Long knowledgePointId,
+            String indexError) {
+        DocumentRow protectedMetadata(boolean manager) {
+            return new DocumentRow(documentId, courseId, filename, contentType, size, parseStatus, indexStatus,
+                    null, null, storageStatus, uploadedAt, updatedAt, knowledgePointId, manager ? indexError : null);
+        }
+
+        boolean indexed() {
+            return "parsed".equals(parseStatus) && "indexed".equals(indexStatus);
+        }
+    }
 
     public record ChunkRow(String chunkId, String title, String content, String source, double score) {}
 }

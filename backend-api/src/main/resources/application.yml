@@ -12,6 +12,10 @@ spring:
   flyway:
     enabled: ${FLYWAY_ENABLED:true}
     baseline-on-migrate: true
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 21MB
   jackson:
     property-naming-strategy: SNAKE_CASE
     default-property-inclusion: non_null

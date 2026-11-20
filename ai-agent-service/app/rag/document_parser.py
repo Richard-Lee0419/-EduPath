@@ -14,6 +14,39 @@ class DocumentTooLargeError(DocumentParseError):
         super().__init__(f"文档大小超过限制: {max_bytes} bytes")
 
 
+def parse_pdf_pages(raw: bytes, *, max_pages: int, max_characters: int) -> tuple[int, list[tuple[int, str]]]:
+    """Extract nonempty pages and preserve the original one-based physical page numbers."""
+    from pypdf import PdfReader
+
+    if not raw.startswith(b"%PDF-"):
+        raise DocumentParseError("invalid_pdf")
+    try:
+        reader = PdfReader(BytesIO(raw))
+        if reader.is_encrypted:
+            raise DocumentParseError("encrypted")
+        count = len(reader.pages)
+        if count > max_pages:
+            raise DocumentParseError("page_limit")
+
+        result: list[tuple[int, str]] = []
+        characters = 0
+        for number, page in enumerate(reader.pages, start=1):
+            extracted = page.extract_text() or ""
+            characters += len(extracted)
+            if characters > max_characters:
+                raise DocumentParseError("text_limit")
+            text = _normalize_text(extracted)
+            if text:
+                result.append((number, text))
+        if not result:
+            raise DocumentParseError("no_text")
+        return count, result
+    except DocumentParseError:
+        raise
+    except Exception as exception:
+        raise DocumentParseError("invalid_pdf") from exception
+
+
 def parse_document_bytes(
     raw: bytes,
     *,

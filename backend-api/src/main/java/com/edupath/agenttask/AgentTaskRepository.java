@@ -1,11 +1,14 @@
 package com.edupath.agenttask;
 
+import com.edupath.auth.JwtService.AuthPrincipal;
 import com.edupath.common.JsonCodec;
+import com.edupath.course.CourseAccess;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -84,6 +87,16 @@ public class AgentTaskRepository {
                 taskId);
     }
 
+    @Transactional
+    public void createScopedTask(
+            String taskId, String domain, String status, int progress, String operationType, String requestPayload,
+            Long actorUserId, String actorUsername, List<AgentTaskService.AgentStepPlan> plans, List<Long> courseIds) {
+        createTask(taskId, domain, status, progress, operationType, requestPayload, actorUserId, actorUsername, plans);
+        for (long courseId : courseIds) {
+            jdbcTemplate.update("INSERT INTO agent_task_courses (task_id, course_id) VALUES (?, ?)", taskId, courseId);
+        }
+    }
+
     public void updateStep(String taskId, int stepOrder, String status, String message) {
         jdbcTemplate.update(
                 """
@@ -154,18 +167,27 @@ public class AgentTaskRepository {
                 .findFirst();
     }
 
-    public List<TaskListItem> listTasks(long actorUserId, String status, int limit, int offset) {
+    public boolean hasUnreadableCourse(String taskId, AuthPrincipal viewer) {
+        CourseAccess.Scope scope = taskCourseScope("?", viewer);
+        List<Object> arguments = new ArrayList<>();
+        arguments.add(taskId);
+        arguments.addAll(scope.arguments());
+        return Boolean.TRUE.equals(jdbcTemplate.queryForObject("SELECT " + scope.sql(), Boolean.class, arguments.toArray()));
+    }
+
+    public List<TaskListItem> listTasks(AuthPrincipal viewer, String status, int limit, int offset) {
         String statusClause = status == null ? "" : " AND status = ?";
-        Object[] arguments = status == null
-                ? new Object[] {actorUserId, limit, offset}
-                : new Object[] {actorUserId, status, limit, offset};
+        CourseAccess.Scope scope = taskCourseScope("agent_tasks.task_id", viewer);
+        List<Object> arguments = listArguments(viewer, status, scope);
+        arguments.add(limit);
+        arguments.add(offset);
         return jdbcTemplate.query(
                 """
                 SELECT task_id, domain, operation_type, status, progress, current_agent,
                        error_message, actor_username, created_at, updated_at
                 FROM agent_tasks
                 WHERE actor_user_id = ?
-                """ + statusClause + " ORDER BY updated_at DESC, task_id DESC LIMIT ? OFFSET ?",
+                """ + statusClause + " AND NOT " + scope.sql() + " ORDER BY updated_at DESC, task_id DESC LIMIT ? OFFSET ?",
                 (rs, rowNum) -> new TaskListItem(
                         rs.getString("task_id"),
                         rs.getString("domain"),
@@ -177,21 +199,33 @@ public class AgentTaskRepository {
                         rs.getString("actor_username"),
                         toOffsetDateTime(rs.getTimestamp("created_at")),
                         toOffsetDateTime(rs.getTimestamp("updated_at"))),
-                arguments);
+                arguments.toArray());
     }
 
-    public long countTasks(long actorUserId, String status) {
-        if (status == null) {
-            Long count = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM agent_tasks WHERE actor_user_id = ?", Long.class, actorUserId);
-            return count == null ? 0 : count;
-        }
+    public long countTasks(AuthPrincipal viewer, String status) {
+        String statusClause = status == null ? "" : " AND status = ?";
+        CourseAccess.Scope scope = taskCourseScope("agent_tasks.task_id", viewer);
         Long count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM agent_tasks WHERE actor_user_id = ? AND status = ?",
-                Long.class,
-                actorUserId,
-                status);
+                "SELECT COUNT(*) FROM agent_tasks WHERE actor_user_id = ?" + statusClause + " AND NOT " + scope.sql(),
+                Long.class, listArguments(viewer, status, scope).toArray());
         return count == null ? 0 : count;
+    }
+
+    private List<Object> listArguments(AuthPrincipal viewer, String status, CourseAccess.Scope scope) {
+        List<Object> arguments = new ArrayList<>();
+        arguments.add(viewer.userId());
+        if (status != null) {
+            arguments.add(status);
+        }
+        arguments.addAll(scope.arguments());
+        return arguments;
+    }
+
+    private static CourseAccess.Scope taskCourseScope(String taskIdColumn, AuthPrincipal viewer) {
+        CourseAccess.Scope course = CourseAccess.unreadableCourse("tc.course_id", viewer);
+        return new CourseAccess.Scope("EXISTS (SELECT 1 FROM agent_task_courses tc"
+                + " JOIN courses hidden_course ON hidden_course.id = tc.course_id WHERE tc.task_id = "
+                + taskIdColumn + " AND " + course.sql() + ")", course.arguments());
     }
 
     public void markStaleRunningTasksFailed() {

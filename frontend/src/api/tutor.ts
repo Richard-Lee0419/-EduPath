@@ -26,6 +26,8 @@ const mapEvidence = (value: unknown): TutorEvidence[] => {
     content: String(item.content || ''),
     score: Number(item.score || 0),
     source: String(item.source || ''),
+    documentId: Number(item.document_id || item.documentId) || undefined,
+    page: Number(item.page) || undefined,
   })).filter((item) => item.chunkId);
 };
 

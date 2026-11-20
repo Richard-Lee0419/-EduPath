@@ -1,6 +1,7 @@
 package com.edupath.evaluation;
 
 import com.edupath.auth.AuthContext;
+import com.edupath.course.CourseAccess;
 import com.edupath.quiz.QuizRepository;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -11,17 +12,24 @@ import org.springframework.stereotype.Service;
 public class EvaluationService {
 
     private final QuizRepository quizRepository;
+    private final CourseAccess courseAccess;
 
-    public EvaluationService(QuizRepository quizRepository) {
+    public EvaluationService(QuizRepository quizRepository, CourseAccess courseAccess) {
         this.quizRepository = quizRepository;
+        this.courseAccess = courseAccess;
     }
 
-    public Map<String, Object> report() {
+    public Map<String, Object> report(Integer courseId) {
         String studentId = AuthContext.currentStudentId();
-        List<QuizRepository.MasteryRow> masteryRows = quizRepository.mastery(studentId);
-        List<QuizRepository.AttemptRow> latestAttempts = quizRepository.attempts(studentId, 1, 1);
+        if (courseId != null) {
+            courseAccess.requireReadable(courseId);
+        }
+        boolean classCourse = courseId != null && courseAccess.isClassCourse(courseId);
+        List<QuizRepository.MasteryRow> masteryRows = classCourse
+                ? quizRepository.classMastery(studentId, courseId) : quizRepository.mastery(studentId);
+        List<QuizRepository.AttemptRow> latestAttempts = quizRepository.attempts(studentId, 1, 1, courseId, true);
         if (!latestAttempts.isEmpty()) {
-            return localReport(studentId, masteryRows, latestAttempts.get(0));
+            return localReport(studentId, masteryRows, latestAttempts.get(0), !classCourse);
         }
         Map<String, Object> emptyReport = new LinkedHashMap<>();
         emptyReport.put("report_id", "");
@@ -39,7 +47,8 @@ public class EvaluationService {
     private Map<String, Object> localReport(
             String studentId,
             List<QuizRepository.MasteryRow> masteryRows,
-            QuizRepository.AttemptRow latestAttempt) {
+            QuizRepository.AttemptRow latestAttempt,
+            boolean profileUpdated) {
         List<Map<String, Object>> mastery = masteryRows.stream()
                 .map(row -> {
                     Map<String, Object> item = new LinkedHashMap<>();
@@ -64,7 +73,7 @@ public class EvaluationService {
         report.put("weak_points", latestAttempt.weakPoints());
         report.put("mistake_patterns", latestAttempt.mistakePatterns());
         report.put("next_actions", nextActions);
-        report.put("profile_updated", true);
+        report.put("profile_updated", profileUpdated);
         report.put("submitted_at", latestAttempt.submittedAt());
         return report;
     }

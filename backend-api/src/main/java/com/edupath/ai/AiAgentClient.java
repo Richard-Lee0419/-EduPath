@@ -1,11 +1,16 @@
 package com.edupath.ai;
 
 import com.edupath.common.ExternalServiceException;
+import com.edupath.course.CourseAccess;
+import com.edupath.course.CourseCatalogService;
 import com.edupath.kb.KnowledgeBaseService.KnowledgeSearchRequest;
 import com.edupath.path.LearningPathService.LearningPathGenerateRequest;
 import com.edupath.profile.ProfileService.ProfileChatRequest;
 import com.edupath.quiz.QuizService.QuizGenerateRequest;
 import com.edupath.resource.ResourceTaskRequest;
+import com.edupath.tutor.PersonalPdfService.PdfAnswer;
+import com.edupath.tutor.PersonalPdfService.PdfIndex;
+import com.edupath.tutor.PersonalPdfService.PdfPage;
 import com.edupath.tutor.TutorService.TutorChatRequest;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -18,10 +23,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 
 @Service
 public class AiAgentClient {
@@ -33,6 +40,8 @@ public class AiAgentClient {
     private final RestClient restClient;
     private final long resourceTaskTimeoutMillis;
     private final long resourceTaskPollMillis;
+    private final CourseAccess courseAccess;
+    private final CourseCatalogService courseCatalog;
 
     @Autowired
     public AiAgentClient(
@@ -40,16 +49,22 @@ public class AiAgentClient {
             @Value("${edupath.ai.connect-timeout-millis:700}") int connectTimeoutMillis,
             @Value("${edupath.ai.read-timeout-millis:1200}") int readTimeoutMillis,
             @Value("${edupath.ai.resource-task-timeout-seconds:180}") long resourceTaskTimeoutSeconds,
-            @Value("${edupath.ai.resource-task-poll-millis:250}") long resourceTaskPollMillis) {
+            @Value("${edupath.ai.resource-task-poll-millis:250}") long resourceTaskPollMillis,
+            CourseAccess courseAccess,
+            CourseCatalogService courseCatalog) {
         this.restClient = buildRestClient(aiServiceBaseUrl, connectTimeoutMillis, readTimeoutMillis);
         this.resourceTaskTimeoutMillis = Math.max(resourceTaskTimeoutSeconds, 10) * 1000;
         this.resourceTaskPollMillis = Math.max(resourceTaskPollMillis, 50);
+        this.courseAccess = courseAccess;
+        this.courseCatalog = courseCatalog;
     }
 
     protected AiAgentClient(String aiServiceBaseUrl) {
         this.restClient = buildRestClient(aiServiceBaseUrl, 700, 1200);
         this.resourceTaskTimeoutMillis = 30_000;
         this.resourceTaskPollMillis = 50;
+        this.courseAccess = null;
+        this.courseCatalog = null;
     }
 
     private static RestClient buildRestClient(String aiServiceBaseUrl, int connectTimeoutMillis, int readTimeoutMillis) {
@@ -119,12 +134,12 @@ public class AiAgentClient {
                 request.knowledgePointIds() == null ? List.of() : request.knowledgePointIds());
         payload.put(
                 "knowledge_points",
-                request.knowledgePoints() == null ? List.of() : request.knowledgePoints());
+                scopedTopicNames(request.courseId(), request.knowledgePointIds(), request.knowledgePoints()));
         payload.put("resource_types", request.normalizedResourceTypes());
         payload.put("difficulty", request.normalizedDifficulty());
         payload.put("goal", request.goal() == null ? "" : request.goal());
         payload.put("student_profile", studentProfile == null ? Map.of() : studentProfile);
-        return payload;
+        return localCoursePayload(payload);
     }
 
     private void pauseResourcePolling(String taskId) {
@@ -146,7 +161,7 @@ public class AiAgentClient {
         payload.put("course_id", request.resolvedCourseId());
         payload.put("query", request.query());
         payload.put("top_k", request.topK() == null ? 5 : request.topK());
-        return postForMap("/kb/search", payload);
+        return postForMap("/kb/search", localCoursePayload(payload));
     }
 
     public KnowledgeIngestResult ingestKnowledgeDocument(KnowledgeDocumentPayload document) {
@@ -156,8 +171,30 @@ public class AiAgentClient {
         payload.put("filename", document.filename());
         payload.put("content_type", document.contentType());
         payload.put("content_base64", Base64.getEncoder().encodeToString(document.contentBytes()));
-        payload.put("source", document.objectKey());
-        Map<String, Object> response = postForMap("/kb/ingest", payload);
+        payload.put("source", document.requirePdfPages() ? document.filename() : document.objectKey());
+        if (document.knowledgePointId() != null) {
+            payload.put("knowledge_point_id", document.knowledgePointId());
+            payload.put("knowledge_point", document.knowledgePoint());
+        }
+        if (document.requirePdfPages()) payload.put("require_pdf_pages", true);
+        Map<String, Object> response;
+        if (document.requirePdfPages()) {
+            try {
+                response = restClient.post().uri("/kb/ingest").body(payload).retrieve().body(MAP_RESPONSE);
+            } catch (RestClientResponseException exception) {
+                if (exception.getStatusCode().value() == 422) {
+                    String reason = "无法解析 PDF。请确认文件未加密、包含可复制文本，且不超过 100 页和文本量上限。";
+                    return new KnowledgeIngestResult(null, "failed", "failed", List.of(),
+                            new AiSafety(false, "unknown", List.of(), List.of(), 0.0), "not_reviewed", reason);
+                }
+                throw new ExternalServiceException("AI 服务", "课程 PDF 索引暂不可用");
+            } catch (RestClientException exception) {
+                throw new ExternalServiceException("AI 服务", "课程 PDF 索引暂不可用");
+            }
+            if (response == null) throw new ExternalServiceException("AI 服务", "课程 PDF 解析未返回结果");
+        } else {
+            response = postForMap("/kb/ingest", payload);
+        }
         return new KnowledgeIngestResult(
                 asString(response.get("task_id")),
                 asString(first(response, "parse_status", "parseStatus")),
@@ -204,11 +241,11 @@ public class AiAgentClient {
         payload.put("days", request == null || request.days() == null ? 14 : request.days());
         payload.put("daily_minutes", request == null || request.dailyMinutes() == null ? 40 : request.dailyMinutes());
         payload.put("student_profile", studentProfile == null ? Map.of() : studentProfile);
-        return postForMap("/path/generate", payload);
+        return postForMap("/path/generate", localCoursePayload(payload));
     }
 
     public Map<String, Object> replanPath(Map<String, Object> payload) {
-        return postForMap("/path/replan", payload == null ? Map.of() : payload);
+        return postForMap("/path/replan", localCoursePayload(payload));
     }
 
     public Map<String, Object> chatTutor(TutorChatRequest request) {
@@ -216,7 +253,7 @@ public class AiAgentClient {
         payload.put("course_id", request.courseId() == null ? 1 : request.courseId());
         payload.put("question", request.normalizedQuestion());
         payload.put("answer_mode", request.normalizedMode());
-        return postForMap("/tutor/chat", payload);
+        return postForMap("/tutor/chat", localCoursePayload(payload));
     }
 
     public Map<String, Object> generateQuiz(
@@ -224,25 +261,71 @@ public class AiAgentClient {
             List<String> knowledgePoints,
             Map<String, Object> studentProfile) {
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("course_id", request.courseId() == null ? 1 : request.courseId());
+        int courseId = request.courseId() == null ? 1 : request.courseId();
+        payload.put("course_id", courseId);
         payload.put("knowledge_point_ids", request.knowledgePointIds() == null ? List.of() : request.knowledgePointIds());
-        payload.put("knowledge_points", knowledgePoints == null ? List.of() : knowledgePoints);
+        payload.put("knowledge_points", scopedTopicNames(courseId, request.knowledgePointIds(), knowledgePoints));
         payload.put("difficulty", request.difficulty() == null ? "basic" : request.difficulty());
         payload.put("question_count", request.questionCount() == null ? 3 : request.questionCount());
         payload.put("student_profile", studentProfile == null ? Map.of() : studentProfile);
-        return postForMap("/quiz/generate", payload);
+        return postForMap("/quiz/generate", localCoursePayload(payload));
     }
 
     public Map<String, Object> analyzeEvaluation(Map<String, Object> payload) {
-        return postForMap("/evaluation/analyze", payload == null ? Map.of() : payload);
+        return postForMap("/evaluation/analyze", localCoursePayload(payload));
     }
 
     public Map<String, Object> regressResourceQuality(Map<String, Object> payload) {
-        return postForMap("/resource/quality/regression", payload == null ? Map.of() : payload);
+        return postForMap("/resource/quality/regression", localCoursePayload(payload));
     }
 
     public Map<String, Object> repairResource(Map<String, Object> payload) {
-        return postForMap("/resource/repair", payload == null ? Map.of() : payload);
+        return postForMap("/resource/repair", localCoursePayload(payload));
+    }
+
+    private Map<String, Object> localCoursePayload(Map<String, Object> payload) {
+        if (payload == null) return Map.of();
+        if (courseAccess == null) return payload;
+        Object candidate = payload.get("course_ids");
+        boolean classCourse = isClassCourse(payload.get("course_id"))
+                || (candidate instanceof List<?> list && list.stream().anyMatch(this::isClassCourse));
+        if (!classCourse) return payload;
+        Map<String, Object> scoped = new LinkedHashMap<>(payload);
+        scoped.put("local_only", true);
+        return scoped;
+    }
+
+    private boolean isClassCourse(Object value) {
+        return value instanceof Number id && courseAccess.isClassCourse(id.longValue());
+    }
+
+    private List<String> scopedTopicNames(Integer courseId, List<Integer> pointIds, List<String> names) {
+        if (courseAccess != null && pointIds != null && !pointIds.isEmpty() && isClassCourse(courseId)) {
+            return courseCatalog.requireTopicNames(courseId, pointIds);
+        }
+        return names == null ? List.of() : names;
+    }
+
+    public PdfIndex indexPersonalPdf(byte[] bytes) {
+        return personalPdfRequest("/internal/personal-pdfs/index", MediaType.APPLICATION_PDF, bytes, PdfIndex.class);
+    }
+
+    public PdfAnswer askPersonalPdf(String question, List<PdfPage> pages) {
+        return personalPdfRequest("/internal/personal-pdfs/ask", MediaType.APPLICATION_JSON,
+                Map.of("question", question, "pages", pages), PdfAnswer.class);
+    }
+
+    private <T> T personalPdfRequest(String path, MediaType mediaType, Object payload, Class<T> type) {
+        try {
+            T response = restClient.post().uri(path).contentType(mediaType).body(payload).retrieve().body(type);
+            if (response != null) {
+                return response;
+            }
+        } catch (RestClientException exception) {
+            // Avoid embedding private page text or questions from downstream errors in logs.
+            log.warn("personal_pdf_call_failed path={} error_type={}", path, exception.getClass().getSimpleName());
+        }
+        throw new ExternalServiceException("个人 PDF", "处理服务暂不可用，请稍后重试");
     }
 
     public Map<String, Object> evaluationReport() {
@@ -351,7 +434,9 @@ public class AiAgentClient {
                     asString(first(item, "title")),
                     asString(first(item, "content")),
                     asDouble(first(item, "score")),
-                    asString(first(item, "source"))));
+                    asString(first(item, "source")),
+                    item.get("document_id") instanceof Number id ? id.longValue() : null,
+                    asInteger(first(item, "page"))));
         }
         return evidence;
     }
@@ -495,7 +580,12 @@ public class AiAgentClient {
         }
     }
 
-    public record AiEvidence(String chunkId, String title, String content, double score, String source) {}
+    public record AiEvidence(String chunkId, String title, String content, double score, String source,
+                             Long documentId, Integer page) {
+        public AiEvidence(String chunkId, String title, String content, double score, String source) {
+            this(chunkId, title, content, score, source, null, null);
+        }
+    }
 
     public record AiSafety(
             boolean passed,
@@ -510,7 +600,14 @@ public class AiAgentClient {
             String filename,
             String contentType,
             byte[] contentBytes,
-            String objectKey) {
+            String objectKey,
+            Long knowledgePointId,
+            String knowledgePoint,
+            boolean requirePdfPages) {
+        public KnowledgeDocumentPayload(long documentId, int courseId, String filename, String contentType,
+                                        byte[] contentBytes, String objectKey) {
+            this(documentId, courseId, filename, contentType, contentBytes, objectKey, null, null, false);
+        }
         public String content() {
             return new String(contentBytes == null ? new byte[0] : contentBytes, StandardCharsets.UTF_8);
         }

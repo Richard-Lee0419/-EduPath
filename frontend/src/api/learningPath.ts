@@ -114,8 +114,8 @@ export const mapLearningPath = (raw: RawMap): LearningPath => ({
   adjustmentSignal: mapPathAdjustmentSignal(raw.adjustment_signal),
 });
 
-export async function getCurrentLearningPath() {
-  const data = await apiGet<RawMap>('/path/current');
+export async function getCurrentLearningPath(courseId?: number) {
+  const data = await apiGet<RawMap>('/path/current', { course_id: courseId });
   return {
     learningPath: mapLearningPath(data),
     raw: data,
@@ -134,13 +134,15 @@ export async function generateLearningPath(payload: GenerateLearningPathPayload)
   };
 }
 
-export async function getPathAdjustmentSignal() {
-  const data = await apiGet<RawMap>('/path/adjustment-signal');
+export async function getPathAdjustmentSignal(courseId?: number) {
+  const data = await apiGet<RawMap>('/path/adjustment-signal', { course_id: courseId });
   return mapPathAdjustmentSignal(data);
 }
 
-export async function startBehaviorPathReplan() {
-  const data = await apiPost<RawMap>('/path/replan/behavior', {});
+const courseQuery = (courseId?: number) => courseId === undefined ? '' : `?course_id=${courseId}`;
+
+export async function startBehaviorPathReplan(courseId?: number) {
+  const data = await apiPost<RawMap>(`/path/replan/behavior${courseQuery(courseId)}`, {});
   return {
     taskId: normalizeTaskId(data),
     reused: Boolean(data.reused),
@@ -148,7 +150,7 @@ export async function startBehaviorPathReplan() {
   };
 }
 
-export async function completeLearningPathDay(day: number) {
+export async function completeLearningPathDay(day: number, courseId?: number) {
   return apiPost<{
     path_id: string;
     version: number;
@@ -156,5 +158,5 @@ export async function completeLearningPathDay(day: number) {
     theme: string;
     completed_days: number[];
     learning_update: import('@/types/api').LearningUpdate;
-  }>(`/path/nodes/${day}/complete`, {});
+  }>(`/path/nodes/${day}/complete${courseQuery(courseId)}`, {});
 }

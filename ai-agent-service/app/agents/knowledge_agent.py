@@ -14,12 +14,19 @@ class KnowledgeAgent:
         query: str,
         top_k: int = 5,
         knowledge_point_ids: list[int] | None = None,
+        *,
+        require_relevance: bool = False,
+        require_knowledge_points: bool = False,
+        knowledge_point_query: str = "",
     ) -> list[RagEvidence]:
         return self.retriever.search(
             course_id=course_id,
             query=query,
             top_k=top_k,
             knowledge_point_ids=knowledge_point_ids,
+            require_relevance=require_relevance,
+            require_knowledge_points=require_knowledge_points,
+            knowledge_point_query=knowledge_point_query,
         )
 
     def topic_names(self, evidence: list[RagEvidence]) -> list[str]:
@@ -63,11 +70,12 @@ class KnowledgeAgent:
         title: str,
         content: str,
         source: str,
+        pages: list[tuple[int, str]] | None = None,
     ) -> list[RagChunk]:
         return self.retriever.prepare_uploaded_document(
             document_id=document_id, course_id=course_id, course_code=course_code,
             knowledge_point_id=knowledge_point_id, knowledge_point=knowledge_point,
-            title=title, content=content, source=source,
+            title=title, content=content, source=source, pages=pages,
         )
 
     def uploaded_chunk_evidence(self, chunks: list[RagChunk]) -> list[RagEvidence]:

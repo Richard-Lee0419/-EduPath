@@ -1,6 +1,7 @@
 package com.edupath.learning;
 
 import com.edupath.auth.AuthContext;
+import com.edupath.course.CourseAccess;
 import com.edupath.profile.ProfileService;
 import java.util.ArrayList;
 import java.util.List;
@@ -14,11 +15,13 @@ public class LearningEventService {
 
     private final LearningEventRepository learningEventRepository;
     private final ProfileService profileService;
+    private final CourseAccess courseAccess;
 
     public LearningEventService(
-            LearningEventRepository learningEventRepository, ProfileService profileService) {
+            LearningEventRepository learningEventRepository, ProfileService profileService, CourseAccess courseAccess) {
         this.learningEventRepository = learningEventRepository;
         this.profileService = profileService;
+        this.courseAccess = courseAccess;
     }
 
     @Transactional
@@ -27,11 +30,16 @@ public class LearningEventService {
         String studentId = AuthContext.currentStudentId();
         List<String> eventIds = new ArrayList<>();
         List<MasteryUpdate> masteryUpdates = new ArrayList<>();
+        List<ProfileService.MasterySignal> profileSignals = new ArrayList<>();
         int duplicates = 0;
         for (LearningEventCommand command : commands == null ? List.<LearningEventCommand>of() : commands) {
             if (command.knowledgePoint() == null || command.knowledgePoint().isBlank()) {
                 continue;
             }
+            courseAccess.requireReadable(command.courseId());
+            boolean isClassEvidence = command.evidenceWeight() > 0 && courseAccess.isClassCourse(command.courseId());
+            int previousScore = isClassEvidence ? learningEventRepository.classMastery(studentId, command.courseId(),
+                    command.knowledgePoint(), command.eventType(), 0).masteryScore() : 0;
             String eventId = "learn_" + UUID.randomUUID().toString().replace("-", "");
             boolean inserted = learningEventRepository.insert(
                     command, eventId, studentId, principal.userId());
@@ -40,23 +48,24 @@ public class LearningEventService {
                 continue;
             }
             eventIds.add(eventId);
-            if (command.evidenceWeight() > 0) {
-                masteryUpdates.add(learningEventRepository.applyBehaviorEvidence(
+            if (isClassEvidence) {
+                masteryUpdates.add(learningEventRepository.classMastery(studentId, command.courseId(),
+                        command.knowledgePoint(), command.eventType(), previousScore));
+            } else if (command.evidenceWeight() > 0) {
+                MasteryUpdate update = learningEventRepository.applyBehaviorEvidence(
                         studentId,
                         command.knowledgePoint(),
                         command.evidenceWeight(),
                         command.evidenceScore(),
-                        command.eventType()));
+                        command.eventType());
+                masteryUpdates.add(update);
+                profileSignals.add(new ProfileService.MasterySignal(
+                        update.knowledgePoint(), update.masteryScore(), update.eventType()));
             }
         }
-        Map<String, Object> profileUpdate = masteryUpdates.isEmpty()
+        Map<String, Object> profileUpdate = profileSignals.isEmpty()
                 ? Map.of("updated", false)
-                : profileService.updateAfterLearningEvents(
-                        masteryUpdates.stream()
-                                .map(item -> new ProfileService.MasterySignal(
-                                        item.knowledgePoint(), item.masteryScore(), item.eventType()))
-                                .toList(),
-                        eventIds.get(0));
+                : profileService.updateAfterLearningEvents(profileSignals, eventIds.get(0));
         return new LearningUpdateResult(eventIds.size(), duplicates, eventIds, masteryUpdates, profileUpdate);
     }
 

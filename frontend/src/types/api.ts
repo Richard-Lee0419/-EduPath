@@ -17,9 +17,11 @@ export type Difficulty = "basic" | "medium" | "advanced";
 
 export type Course = {
   id: number;
-  code: "data_structures_algorithms" | "computer_organization";
+  code: string;
   name: string;
   description: string;
+  visibility?: 'public' | 'class';
+  status?: 'draft' | 'active' | 'archived';
 };
 
 export type KnowledgePoint = {
@@ -162,6 +164,8 @@ export type ResourceEvidence = {
   content: string;
   score: number;
   source: string;
+  document_id?: number;
+  page?: number;
 };
 
 export type ResourceSafety = {

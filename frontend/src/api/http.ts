@@ -63,6 +63,12 @@ export async function apiUpload<T>(path: string, formData: FormData): Promise<T>
   return unwrapApiResponse<T>(response);
 }
 
+export async function apiGetBlob(path: string): Promise<Blob> {
+  const response = await fetch(`${apiBaseUrl}${path}`, { headers: buildAuthHeaders(), cache: 'no-store' });
+  if (!response.ok) return unwrapApiResponse<Blob>(response);
+  return response.blob();
+}
+
 function buildAuthHeaders(headers?: Record<string, string>) {
   const token = localStorage.getItem('edupath_token');
   return {

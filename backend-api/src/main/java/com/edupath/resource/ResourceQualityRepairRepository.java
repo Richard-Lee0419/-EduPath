@@ -1,5 +1,7 @@
 package com.edupath.resource;
 
+import com.edupath.auth.AuthContext;
+import com.edupath.course.CourseAccess;
 import com.edupath.common.JsonCodec;
 import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
@@ -263,10 +265,16 @@ public class ResourceQualityRepairRepository {
             args.add(ownerUserId);
         }
         if (managerUserId != null) {
-            sql.append(" AND EXISTS (SELECT 1 FROM user_course_roles ucr "
-                    + "WHERE ucr.user_id = ? AND ucr.course_id = q.course_id)");
-            args.add(managerUserId);
+            var management = CourseAccess.manageableCourses("q.course_id", managerUserId, false);
+            sql.append(" AND ").append(management.sql());
+            args.addAll(management.arguments());
         }
+        var actor = AuthContext.current();
+        CourseAccess.readableCourses("q.course_id", actor == null ? null : actor.userId(),
+                actor == null ? null : actor.role()).ifPresent(scope -> {
+                    sql.append(" AND ").append(scope.sql());
+                    args.addAll(scope.arguments());
+                });
         if (courseId != null) {
             sql.append(" AND q.course_id = ?");
             args.add(courseId);

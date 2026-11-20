@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from app.core.config import settings
 from app.rag.chunker import Chunker, RagChunk
 from app.rag.chroma_vector_store import ChromaVectorStore
 from app.rag.document_loader import DocumentLoader, SourceDocument
+from app.rag.lexical_retrieval import has_query_overlap
 from app.rag.vector_store import SearchHit, VectorStore
 
 
@@ -27,6 +28,8 @@ class RagEvidence:
     document_type: str = "lecture"
     contains_examples: bool = False
     heading_path: tuple[str, ...] = ()
+    document_id: int | None = None
+    page: int | None = None
 
 
 class Retriever:
@@ -55,14 +58,33 @@ class Retriever:
         query: str,
         top_k: int = 5,
         knowledge_point_ids: list[int] | None = None,
+        *,
+        require_relevance: bool = False,
+        require_knowledge_points: bool = False,
+        knowledge_point_query: str = "",
     ) -> list[RagEvidence]:
+        limit = max(1, min(top_k, 10))
+        point_filter = set(knowledge_point_ids or []) if require_knowledge_points else set()
+        candidate_points = knowledge_point_ids
+        if point_filter:
+            candidate_points = sorted(point_filter | {0})
         hits = self.vector_store.search(
             course_id=course_id,
             query=query,
-            top_k=top_k,
-            knowledge_point_ids=knowledge_point_ids,
+            top_k=10 if require_relevance or point_filter else limit,
+            knowledge_point_ids=candidate_points,
+            require_knowledge_points=bool(point_filter),
         )
-        return [self._to_evidence(hit) for hit in hits]
+        if require_relevance:
+            hits = [hit for hit in hits if has_query_overlap(query, hit.content)]
+        if point_filter:
+            topic_query = knowledge_point_query.strip() or query
+            hits = [
+                hit for hit in hits
+                if point_filter.intersection((hit.knowledge_point_id, *hit.related_knowledge_point_ids))
+                or (hit.knowledge_point_id == 0 and hit.page is not None and has_query_overlap(topic_query, hit.content))
+            ]
+        return [self._to_evidence(hit) for hit in hits[:limit]]
 
     def ingest_uploaded_document(
         self,
@@ -102,6 +124,7 @@ class Retriever:
         title: str,
         content: str,
         source: str,
+        pages: list[tuple[int, str]] | None = None,
     ) -> list[RagChunk]:
         """Parse/chunk without touching the vector store."""
 
@@ -114,7 +137,15 @@ class Retriever:
             content=content,
             source=source,
         )
-        return self.chunker.chunk_uploaded_document(document, document_id)
+        if pages is None:
+            return self.chunker.chunk_uploaded_document(document, document_id)
+        return [
+            chunk
+            for page, page_content in pages
+            for chunk in self.chunker.chunk_uploaded_document(
+                replace(document, content=page_content), document_id, page=page
+            )
+        ]
 
     def replace_uploaded_document_chunks(self, *, course_id: int, document_id: int, chunks: list[RagChunk]) -> int:
         return self.vector_store.replace_document_chunks(course_id, document_id, chunks)
@@ -141,6 +172,8 @@ class Retriever:
                 document_type=chunk.document_type,
                 contains_examples=chunk.contains_examples,
                 heading_path=chunk.heading_path,
+                document_id=chunk.document_id,
+                page=chunk.page,
             )
             for chunk in chunks
         ]
@@ -182,6 +215,8 @@ class Retriever:
             document_type=hit.document_type,
             contains_examples=hit.contains_examples,
             heading_path=hit.heading_path,
+            document_id=hit.document_id,
+            page=hit.page,
         )
 
 def _build_vector_store() -> VectorStore | ChromaVectorStore:

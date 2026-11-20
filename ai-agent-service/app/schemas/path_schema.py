@@ -18,6 +18,7 @@ class PathGenerateRequest(BaseModel):
     days: int = Field(default=14, ge=1, le=30)
     daily_minutes: int = Field(default=40, ge=10, le=180)
     student_profile: dict[str, object] = Field(default_factory=dict)
+    local_only: bool = False
 
 
 class LearningPathTask(BaseModel):
@@ -103,6 +104,7 @@ class PathReplanRequest(BaseModel):
     trigger: Literal["quiz_evaluation", "behavior_signal"] = "quiz_evaluation"
     evaluation: PathEvaluationInput | None = None
     behavior_signal: PathBehaviorSignalInput | None = None
+    local_only: bool = False
 
     @model_validator(mode="after")
     def validate_trigger_context(self) -> "PathReplanRequest":

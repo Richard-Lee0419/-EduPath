@@ -108,7 +108,8 @@ class ResourceGenerationPipeline:
         personalization = PersonalizationContext.from_profile({}, request.expected_difficulty)
         model_calls: list[ModelCallRecord] = []
         candidate = baseline
-        if self.llm_gateway.is_configured:
+        use_model = self.llm_gateway.is_configured and not request.local_only
+        if use_model:
             target_feedback = {
                 name: request.current_evaluation.dimensions[name].model_dump()
                 for name in request.regressed_dimensions
@@ -146,7 +147,7 @@ class ResourceGenerationPipeline:
                 model_calls=model_calls,
             )
 
-        safety = self._review_resources([candidate], evidence, model_calls)
+        safety = self._review_resources([candidate], evidence, model_calls, use_model=use_model)
         candidate = self._evaluate_quality(
             [candidate], evidence, safety, request.expected_difficulty
         )[0]
@@ -170,8 +171,8 @@ class ResourceGenerationPipeline:
         runtime = _model_runtime(
             self.llm_gateway,
             model_calls,
-            quality_feedback_revision_rounds=1 if self.llm_gateway.is_configured else 0,
-            quality_revised_resource_count=1 if self.llm_gateway.is_configured else 0,
+            quality_feedback_revision_rounds=int(use_model),
+            quality_revised_resource_count=int(use_model),
         )
         return ResourceRepairResponse(
             repair_id=request.repair_id,
@@ -220,11 +221,15 @@ class ResourceGenerationPipeline:
         self._step(task_id, "ProfileAgent", "success", "已提取目标、薄弱点和资源偏好", 12)
 
         self._step(task_id, "KnowledgeAgent", "running", "正在检索真实课程知识库", 16)
+        topic_query = " ".join(request.knowledge_points).strip()
+        query = topic_query if request.local_only and request.knowledge_point_ids and topic_query else _query_for_resource(request)
         evidence = self.knowledge_agent.retrieve(
             course_id=request.course_id,
-            query=_query_for_resource(request),
+            query=query,
             top_k=5,
             knowledge_point_ids=request.knowledge_point_ids,
+            require_knowledge_points=request.local_only,
+            knowledge_point_query=topic_query,
         )
         if not evidence:
             raise RuntimeError("KnowledgeAgent did not retrieve course evidence")
@@ -249,6 +254,7 @@ class ResourceGenerationPipeline:
 
         resources: list[GeneratedResource] = []
         model_calls: list[ModelCallRecord] = []
+        use_model = self.llm_gateway.is_configured and not request.local_only
         resource_span = 48
         for index, resource_type in enumerate(resource_types):
             agent = _agent_for(resource_type)
@@ -266,7 +272,7 @@ class ResourceGenerationPipeline:
             generated = baseline.model_copy(
                 update={"evidence_chunk_ids": [item.chunk_id for item in evidence[:3]]}
             )
-            if self.llm_gateway.is_configured:
+            if use_model:
                 model_context = {
                     "task": {
                         "course_id": request.course_id,
@@ -294,9 +300,9 @@ class ResourceGenerationPipeline:
             resources.append(generated)
 
         self._step(task_id, "SafetyAgent", "running", "正在执行事实一致性与内容安全审查", 88)
-        safety = self._review_resources(resources, evidence, model_calls)
+        safety = self._review_resources(resources, evidence, model_calls, use_model=use_model)
         safety_revision_rounds = 0
-        if self.llm_gateway.is_configured and not safety.passed:
+        if use_model and not safety.passed:
             safety_revision_rounds = 1
             self._step(
                 task_id,
@@ -350,7 +356,7 @@ class ResourceGenerationPipeline:
                 )
             resources = revised_resources
             self._step(task_id, "SafetyAgent", "running", "正在复核修订后的资源", 96)
-            safety = self._review_resources(resources, evidence, model_calls)
+            safety = self._review_resources(resources, evidence, model_calls, use_model=use_model)
         resources = self._evaluate_quality(
             resources,
             evidence,
@@ -365,7 +371,7 @@ class ResourceGenerationPipeline:
             if resource.quality_evaluation is not None
             and not resource.quality_evaluation.gate_passed
         ]
-        if self.llm_gateway.is_configured and safety.passed and failed_indexes:
+        if use_model and safety.passed and failed_indexes:
             quality_revision_rounds = 1
             quality_revised_resource_count = len(failed_indexes)
             for revision_index, resource_index in enumerate(failed_indexes):
@@ -413,7 +419,7 @@ class ResourceGenerationPipeline:
                     min(revision_progress + 1, 99),
                 )
             self._step(task_id, "SafetyAgent", "running", "正在复核质量修订后的资源", 99)
-            safety = self._review_resources(resources, evidence, model_calls)
+            safety = self._review_resources(resources, evidence, model_calls, use_model=use_model)
             resources = self._evaluate_quality(
                 resources,
                 evidence,
@@ -513,12 +519,14 @@ class ResourceGenerationPipeline:
         resources: list[GeneratedResource],
         evidence: list[RagEvidence],
         model_calls: list[ModelCallRecord],
+        *,
+        use_model: bool,
     ) -> SafetyReview:
         deterministic_review = self.safety_agent.review(
             output_text="\n".join(resource.content for resource in resources),
             evidence=evidence,
         )
-        if not self.llm_gateway.is_configured:
+        if not use_model:
             return deterministic_review
         safety_context = {
             "resources": [
@@ -720,6 +728,8 @@ def _resource_evidence(item: RagEvidence) -> ResourceEvidence:
         content=item.content,
         score=item.score,
         source=item.source,
+        document_id=item.document_id,
+        page=item.page,
     )
 
 

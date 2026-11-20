@@ -3,6 +3,7 @@ package com.edupath.path;
 import com.edupath.ai.AiAgentClient;
 import com.edupath.auth.AuthContext;
 import com.edupath.common.ExternalServiceException;
+import com.edupath.course.CourseAccess;
 import com.edupath.course.CourseCatalogService;
 import com.edupath.learning.LearningEventService;
 import com.edupath.profile.ProfileService;
@@ -11,7 +12,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Predicate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,6 +27,7 @@ public class LearningPathService {
     private final ProfileService profileService;
     private final LearningEventService learningEventService;
     private final PathAdjustmentService pathAdjustmentService;
+    private final CourseAccess courseAccess;
 
     public LearningPathService(
             CourseCatalogService courseCatalogService,
@@ -31,39 +35,39 @@ public class LearningPathService {
             LearningPathRepository learningPathRepository,
             ProfileService profileService,
             LearningEventService learningEventService,
-            PathAdjustmentService pathAdjustmentService) {
+            PathAdjustmentService pathAdjustmentService,
+            CourseAccess courseAccess) {
         this.courseCatalogService = courseCatalogService;
         this.aiAgentClient = aiAgentClient;
         this.learningPathRepository = learningPathRepository;
         this.profileService = profileService;
         this.learningEventService = learningEventService;
         this.pathAdjustmentService = pathAdjustmentService;
+        this.courseAccess = courseAccess;
     }
 
-    public Map<String, Object> currentPath() {
+    public Map<String, Object> currentPath(Integer courseId) {
         String studentId = AuthContext.currentStudentId();
-        return learningPathRepository
-                .current(studentId)
+        return currentPathVersion(studentId, courseId)
                 .map(this::toResponse)
                 .orElseGet(() -> emptyPath(studentId));
     }
 
-    public Map<String, Object> adjustmentSignal() {
+    public Map<String, Object> adjustmentSignal(Integer courseId) {
         String studentId = AuthContext.currentStudentId();
-        return learningPathRepository
-                .current(studentId)
-                .map(version -> pathAdjustmentService.evaluate(
+        return currentPathVersion(studentId, courseId)
+                .map(version -> evaluateBehavior(
                         version, learningEventService.completedPathDays(studentId, version.pathId())))
                 .orElseGet(pathAdjustmentService::noPathSignal);
     }
 
-    public BehaviorReplanPreparation prepareBehaviorReplan() {
+    public BehaviorReplanPreparation prepareBehaviorReplan(Integer courseId) {
         String studentId = AuthContext.currentStudentId();
-        LearningPathRepository.PathVersion current = learningPathRepository.current(studentId)
+        LearningPathRepository.PathVersion current = currentPathVersion(studentId, courseId)
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.NOT_FOUND, "尚未生成学习路径"));
         List<Integer> completedDays = learningEventService.completedPathDays(studentId, current.pathId());
-        Map<String, Object> signal = pathAdjustmentService.evaluate(current, completedDays);
+        Map<String, Object> signal = evaluateBehavior(current, completedDays);
         if (!Boolean.TRUE.equals(signal.get("should_replan"))) {
             throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.CONFLICT,
@@ -74,12 +78,42 @@ public class LearningPathService {
                 studentId,
                 current.pathId(),
                 current.version(),
+                courseId,
+                integerList(current.path().get("course_ids")).stream().map(Integer::longValue).toList(),
                 signal);
+    }
+
+    public List<Long> requestedCourseIds(LearningPathGenerateRequest request) {
+        List<Integer> requested = request.courseIds();
+        if (requested == null || requested.isEmpty()) {
+            return List.of(1L, 2L);
+        }
+        return requested.stream().map(Integer::longValue).distinct().toList();
+    }
+
+    private Optional<LearningPathRepository.PathVersion> currentPathVersion(String studentId, Integer courseId) {
+        if (courseId != null) {
+            courseAccess.requireReadable(courseId);
+        }
+        return learningPathRepository.currentMatching(studentId, pathScope(courseId));
+    }
+
+    private Predicate<LearningPathRepository.PathVersion> pathScope(Integer courseId) {
+        boolean classSelected = courseId != null && courseAccess.isClassCourse(courseId);
+        return version -> {
+            List<Integer> ids = integerList(version.path().get("course_ids"));
+            if (!classSelected && ids.stream().anyMatch(courseAccess::isClassCourse)) {
+                return false;
+            }
+            return (courseId == null || ids.contains(courseId)) && ids.stream().allMatch(courseAccess::isReadable);
+        };
     }
 
     @Transactional
     public Map<String, Object> generate(LearningPathGenerateRequest request) {
         String studentId = AuthContext.currentStudentId();
+        List<Long> courseIds = requestedCourseIds(request);
+        courseIds.forEach(courseAccess::requireReadable);
         Map<String, Object> aiResponse = aiAgentClient.generatePath(request, profileService.currentProfileSnapshot());
         Object path = aiResponse.get("path");
         if (!(path instanceof Map<?, ?> pathMap)) {
@@ -96,6 +130,7 @@ public class LearningPathService {
         }
         Map<String, Object> normalized = normalizeMap(pathMap);
         normalized.put("student_id", studentId);
+        normalized.put("course_ids", courseIds);
         Map<String, Object> result = toResponse(learningPathRepository.save(
                 studentId,
                 normalized,
@@ -108,13 +143,13 @@ public class LearningPathService {
     }
 
     @Transactional
-    public Map<String, Object> completeDay(int day) {
+    public Map<String, Object> completeDay(int day, Integer courseId) {
         if (day < 1) {
             throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.BAD_REQUEST, "路径节点序号必须大于 0");
         }
         String studentId = AuthContext.currentStudentId();
-        LearningPathRepository.PathVersion version = learningPathRepository.current(studentId)
+        LearningPathRepository.PathVersion version = currentPathVersion(studentId, courseId)
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.NOT_FOUND, "尚未生成学习路径"));
         Map<String, Object> node = pathNode(version.path().get("daily_plan"), day);
@@ -190,12 +225,16 @@ public class LearningPathService {
             Map<String, Object> studentProfile,
             String evaluationTaskId) {
         String studentId = AuthContext.currentStudentId();
-        LearningPathRepository.PathVersion previous = learningPathRepository.current(studentId).orElse(null);
+        courseAccess.requireReadable(courseId);
+        boolean classCourse = courseAccess.isClassCourse(courseId);
+        LearningPathRepository.PathVersion previous = currentPathVersion(studentId, classCourse ? courseId : null)
+                .filter(version -> !classCourse || List.of(courseId).equals(integerList(version.path().get("course_ids"))))
+                .orElse(null);
         Map<String, Object> previousPath = previous == null
                 ? Map.of()
                 : new LinkedHashMap<>(previous.path());
         List<Integer> courseIds = integerList(previousPath.get("course_ids"));
-        if (courseIds.isEmpty()) {
+        if (classCourse || courseIds.isEmpty()) {
             courseIds = List.of(courseId);
         }
         int dailyMinutes = Math.max(10, Math.min(intValue(previousPath.get("daily_minutes"), 40), 180));
@@ -258,6 +297,7 @@ public class LearningPathService {
 
         Map<String, Object> normalized = normalizeMap(path);
         normalized.put("student_id", studentId);
+        normalized.put("course_ids", courseIds);
         normalized.put("replan_trigger", trigger);
         normalized.put("source_evaluation_task_id", evaluationTaskId);
         normalized.put("previous_path_id", previous == null ? "" : previous.pathId());
@@ -287,7 +327,7 @@ public class LearningPathService {
         }
         LearningPathRepository.PathVersion previous = requireCurrentPath(preparation);
         List<Integer> completedDays = learningEventService.completedPathDays(studentId, previous.pathId());
-        Map<String, Object> freshSignal = pathAdjustmentService.evaluate(previous, completedDays);
+        Map<String, Object> freshSignal = evaluateBehavior(previous, completedDays);
         if (!Boolean.TRUE.equals(freshSignal.get("should_replan"))) {
             throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.CONFLICT, "行为信号已变化，取消本次重规划");
@@ -298,6 +338,7 @@ public class LearningPathService {
         if (courseIds.isEmpty()) {
             courseIds = List.of(1, 2);
         }
+        courseIds.forEach(courseAccess::requireReadable);
         Map<String, Object> metrics = mapValue(freshSignal.get("metrics"));
         Map<String, Object> pacing = mapValue(freshSignal.get("pacing"));
         List<String> weakPoints = stringList(metrics.get("low_mastery_points"));
@@ -355,6 +396,7 @@ public class LearningPathService {
 
         Map<String, Object> normalized = normalizeMap(path);
         normalized.put("student_id", studentId);
+        normalized.put("course_ids", courseIds);
         normalized.put("replan_trigger", "behavior_signal");
         normalized.put("source_behavior_trigger_key", preparation.triggerKey());
         normalized.put("previous_path_id", previous.pathId());
@@ -365,7 +407,7 @@ public class LearningPathService {
                         previous.pathId(),
                         previous.version(),
                         normalized,
-                        String.valueOf(aiResponse.getOrDefault("task_id", "")))
+                        String.valueOf(aiResponse.getOrDefault("task_id", "")), pathScope(preparation.courseId()))
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.CONFLICT,
                         "当前路径版本已变化，行为重规划结果未写入"));
@@ -383,7 +425,7 @@ public class LearningPathService {
     }
 
     private LearningPathRepository.PathVersion requireCurrentPath(BehaviorReplanPreparation preparation) {
-        LearningPathRepository.PathVersion current = learningPathRepository.current(preparation.studentId())
+        LearningPathRepository.PathVersion current = currentPathVersion(preparation.studentId(), preparation.courseId())
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.CONFLICT, "当前学习路径已不存在"));
         if (!current.pathId().equals(preparation.pathId()) || current.version() != preparation.pathVersion()) {
@@ -456,7 +498,8 @@ public class LearningPathService {
             int courseId = courseIds.get((day - 1) % courseIds.size());
             String topic = day % 2 == 0
                     ? courseCatalogService.resolveKnowledgePointNames(courseId, List.of(), List.of()).get(0)
-                    : (courseId == 1 ? "递归调用栈" : "Cache 映射方式");
+                    : (courseId == 1 ? "递归调用栈" : courseId == 2 ? "Cache 映射方式"
+                            : courseCatalogService.resolveKnowledgePointNames(courseId, List.of(), List.of()).get(0));
             dailyPlan.add(Map.of(
                     "day",
                     day,
@@ -504,9 +547,15 @@ public class LearningPathService {
         response.put("version", version.version());
         response.put("source_task_id", version.sourceTaskId());
         response.put("completed_days", completedDays);
-        response.put("adjustment_signal", pathAdjustmentService.evaluate(version, completedDays));
+        response.put("adjustment_signal", evaluateBehavior(version, completedDays));
         response.putIfAbsent("recommended_resources", recommendedResources());
         return response;
+    }
+
+    private Map<String, Object> evaluateBehavior(LearningPathRepository.PathVersion version, List<Integer> completedDays) {
+        List<Integer> classCourses = integerList(version.path().get("course_ids")).stream()
+                .filter(courseAccess::isClassCourse).toList();
+        return pathAdjustmentService.evaluate(version, completedDays, classCourses);
     }
 
     private Map<String, Object> emptyPath(String studentId) {
@@ -601,6 +650,8 @@ public class LearningPathService {
             String studentId,
             String pathId,
             int pathVersion,
+            Integer courseId,
+            List<Long> courseIds,
             Map<String, Object> signal) {}
 
     private record PathTopic(int courseId, String knowledgePoint) {}
