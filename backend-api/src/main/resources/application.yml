@@ -59,6 +59,8 @@ edupath:
   demo-mode:
     enabled: ${DEMO_MODE_ENABLED:true}
     class-name: ${DEMO_CLASS_NAME:测试2班}
+  review-access:
+    enabled: ${REVIEW_ACCESS_ENABLED:false}
   kb:
     max-upload-bytes: ${KB_MAX_UPLOAD_BYTES:20971520}
   jwt:

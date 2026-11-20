@@ -2,6 +2,7 @@
 import { defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { Component } from 'vue';
 import { getStoredUser, logout } from './api/auth';
+import { captureReviewLink, reviewCode } from './api/session';
 import AppShell from './components/AppShell.vue';
 import AsyncPageLoading from './components/AsyncPageLoading.vue';
 import Dashboard from './pages/Dashboard.vue';
@@ -30,7 +31,10 @@ const TeacherInsights = lazyPage(() => import('./pages/TeacherInsights.vue'));
 const TaskCenter = lazyPage(() => import('./pages/TaskCenter.vue'));
 const UserCenter = lazyPage(() => import('./pages/UserCenter.vue'));
 
+captureReviewLink();
 const user = ref<User | null>(getStoredUser());
+const hasReviewLink = ref(Boolean(reviewCode()));
+const teacherRegistration = ref(false);
 const lastUserCenterSource = ref<PageKey>('dashboard');
 const initialProfileIntent = ref<{ text: string; nonce: number } | null>(null);
 
@@ -140,6 +144,8 @@ const navigate = (page: PageKey) => {
       currentPage.value === 'login' || currentPage.value === 'register' ? 'dashboard' : currentPage.value;
   }
 
+  if (page === 'register') teacherRegistration.value = false;
+
   setCurrentPage(page);
 };
 
@@ -165,18 +171,39 @@ const clearProfileIntent = () => {
   initialProfileIntent.value = null;
 };
 
-const handleAuthenticated = (authenticatedUser: User) => {
+const openTeacherRegistration = () => {
+  navigate('register');
+  teacherRegistration.value = true;
+};
+
+const handleAuthenticated = (authenticatedUser: User, next?: PageKey) => {
   user.value = authenticatedUser;
-  setCurrentPage('dashboard', { replace: true });
+  hasReviewLink.value = Boolean(reviewCode());
+  const landing = authenticatedUser.role === 'teacher' ? 'teacherInsights' : 'learningHome';
+  setCurrentPage(authenticatedUser.review ? landing : next ?? 'dashboard', { replace: true });
 };
 
 const handleLogout = async () => {
-  await logout();
-  user.value = null;
-  setCurrentPage('login', { replace: true });
+  try {
+    await logout();
+  } catch {
+    // The local session is already cleared, including when the server's grant has expired.
+  } finally {
+    user.value = null;
+    setCurrentPage('login', { replace: true });
+  }
+};
+
+const handleReviewLink = () => {
+  if (!captureReviewLink()) return false;
+  user.value = getStoredUser();
+  hasReviewLink.value = Boolean(reviewCode());
+  setCurrentPage(user.value ? 'dashboard' : 'login', { replace: true });
+  return true;
 };
 
 const handlePopState = () => {
+  if (handleReviewLink()) return;
   const routePage = pageFromPath(window.location.pathname);
   if (!user.value && !isPublicPage(routePage)) {
     setCurrentPage('login', { replace: true });
@@ -195,10 +222,12 @@ const handlePopState = () => {
 
 onMounted(() => {
   window.addEventListener('popstate', handlePopState);
+  window.addEventListener('hashchange', handleReviewLink);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener('popstate', handlePopState);
+  window.removeEventListener('hashchange', handleReviewLink);
 });
 </script>
 
@@ -210,10 +239,17 @@ onBeforeUnmount(() => {
   />
   <Register
     v-else-if="currentPage === 'register' && !user"
+    :initial-teacher="teacherRegistration"
     @authenticated="handleAuthenticated"
     @navigate="navigate"
   />
-  <Login v-else-if="!user" @authenticated="handleAuthenticated" @navigate="navigate" />
+  <Login
+    v-else-if="!user"
+    :has-review-link="hasReviewLink"
+    @authenticated="handleAuthenticated"
+    @navigate="navigate"
+    @teacher-registration="openTeacherRegistration"
+  />
 
   <AppShell
     v-else
@@ -224,6 +260,10 @@ onBeforeUnmount(() => {
     @exit="handleExit"
     @open-user-center="handleOpenUserCenter"
   >
+    <div v-if="user.review" class="auth-review-session">
+      <span>评委体验 · {{ user.role === 'teacher' ? '教师端' : '学生端' }}</span>
+      <button type="button" class="text-action" @click="handleLogout">切换体验身份</button>
+    </div>
     <Dashboard
       v-if="currentPage === 'dashboard'"
       :user="user"

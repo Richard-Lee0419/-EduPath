@@ -33,7 +33,16 @@ public class JwtService {
 
     public String issue(UserRepository.UserRecord user) {
         long now = Instant.now().getEpochSecond();
-        long expiresAt = now + ttlSeconds;
+        return issue(user, now, now + ttlSeconds, false);
+    }
+
+    public ReviewToken issueReview(UserRepository.UserRecord user, Instant linkExpiresAt) {
+        long now = Instant.now().getEpochSecond();
+        long expiresAt = Math.min(now + ttlSeconds, linkExpiresAt.getEpochSecond());
+        return new ReviewToken(issue(user, now, expiresAt, true), Instant.ofEpochSecond(expiresAt));
+    }
+
+    private String issue(UserRepository.UserRecord user, long now, long expiresAt, boolean review) {
         return sign(
                 Map.of("alg", "HS256", "typ", "JWT"),
                 Map.of(
@@ -41,6 +50,7 @@ public class JwtService {
                         "sub", Long.toString(user.id()),
                         "username", user.username(),
                         "role", user.role(),
+                        "review", review,
                         "jti", UUID.randomUUID().toString(),
                         "iat", now,
                         "exp", expiresAt));
@@ -74,7 +84,8 @@ public class JwtService {
                 String.valueOf(claims.get("username")),
                 String.valueOf(claims.get("role")),
                 String.valueOf(claims.get("jti")),
-                exp);
+                exp,
+                Boolean.TRUE.equals(claims.get("review")));
     }
 
     private String sign(Map<String, Object> header, Map<String, Object> payload) {
@@ -135,5 +146,8 @@ public class JwtService {
         }
     }
 
-    public record AuthPrincipal(long userId, String username, String role, String jti, long expiresAtEpochSeconds) {}
+    public record ReviewToken(String value, Instant expiresAt) {}
+
+    public record AuthPrincipal(long userId, String username, String role, String jti, long expiresAtEpochSeconds,
+                                boolean review) {}
 }

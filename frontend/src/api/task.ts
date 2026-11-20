@@ -1,4 +1,5 @@
 import { apiBaseUrl, apiGet, apiPost } from './http';
+import { accessToken } from './session';
 import type { AgentStep } from '../types';
 import type { AgentTask, AgentTaskListResponse, TaskCreated, TaskStatus } from '@/types/api';
 
@@ -127,7 +128,7 @@ async function waitForAgentTaskStream(
   }, timeoutMs);
   const forwardAbort = () => controller.abort(abortReason(signal!));
   signal?.addEventListener('abort', forwardAbort, { once: true });
-  const token = localStorage.getItem('edupath_token');
+  const token = accessToken();
   try {
     const response = await fetch(`${apiBaseUrl}/agent/tasks/${encodeURIComponent(taskId)}/stream`, {
       headers: token ? { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' } : { Accept: 'text/event-stream' },

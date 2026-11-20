@@ -23,6 +23,7 @@ export interface User {
   username: string;
   email?: string;
   role: UserRole;
+  review?: boolean;
   name: string;
   major?: string;
   grade?: string;
@@ -39,7 +40,10 @@ export interface RegisterPayload {
   email: string;
   password: string;
   name?: string;
+  teacherInviteCode?: string;
 }
+
+export type ReviewRole = 'teacher' | 'student';
 
 export type AgentStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
 

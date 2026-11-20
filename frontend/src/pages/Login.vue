@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { login } from '../api/auth';
+import { enterReview, login } from '../api/auth';
 import wordmarkUrl from '../assets/images/edupath-wordmark-white.png';
 import AuthLearningVisual from '../components/AuthLearningVisual.vue';
 import ExitButton from '../components/ExitButton.vue';
-import type { User, PageKey } from '../types';
+import type { User, PageKey, ReviewRole } from '../types';
+
+defineProps<{ hasReviewLink?: boolean }>();
 
 const emit = defineEmits<{
   authenticated: [user: User];
   navigate: [page: PageKey];
+  teacherRegistration: [];
 }>();
 
 const username = ref('');
@@ -17,24 +20,25 @@ const errorMessage = ref('');
 const errorField = ref<'username' | 'password' | 'form' | ''>('');
 const isSubmitting = ref(false);
 const showPassword = ref(false);
+const reviewError = ref('');
+const pendingReviewRole = ref<ReviewRole | null>(null);
 
-const enterDemo = async () => {
-  if (isSubmitting.value) return;
-  errorMessage.value = '';
-  errorField.value = '';
-  isSubmitting.value = true;
+const openReview = async (role: ReviewRole) => {
+  if (isSubmitting.value || pendingReviewRole.value) return;
+  reviewError.value = '';
+  pendingReviewRole.value = role;
   try {
-    const user = await login({ username: 'demo', password: '123456' });
+    const user = await enterReview(role);
     emit('authenticated', user);
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '体验账号暂时不可用，请稍后重试';
-    errorField.value = 'form';
+    reviewError.value = error instanceof Error ? error.message : '评委体验暂时不可用，请稍后重试';
   } finally {
-    isSubmitting.value = false;
+    pendingReviewRole.value = null;
   }
 };
 
 const submit = async () => {
+  if (isSubmitting.value || pendingReviewRole.value) return;
   errorMessage.value = '';
   errorField.value = '';
 
@@ -67,7 +71,7 @@ const submit = async () => {
 </script>
 
 <template>
-  <main class="auth-page auth-page--target page-enter">
+  <main class="auth-page auth-page--target auth-access-page page-enter">
     <AuthLearningVisual />
 
     <ExitButton
@@ -146,26 +150,37 @@ const submit = async () => {
 
         <p v-if="errorMessage" id="login-error" class="auth-error" role="alert">{{ errorMessage }}</p>
 
-        <button class="primary-action wide" type="submit" :disabled="isSubmitting">
+        <button class="primary-action wide" type="submit" :disabled="isSubmitting || pendingReviewRole !== null">
           {{ isSubmitting ? '正在进入' : '进入知径 EduPath  →' }}
         </button>
       </form>
 
-      <div class="auth-switch">
+      <section class="auth-review-card" aria-label="评委体验" :aria-busy="pendingReviewRole !== null">
+        <div class="auth-review-card__intro">
+          <span class="auth-review-card__icon" aria-hidden="true">✦</span>
+          <div>
+            <h2>评委体验</h2>
+            <p>{{ hasReviewLink
+              ? '在同一演示班级体验教师发布课程和学生学习。'
+              : '请使用参赛材料中的评委专属链接。' }}</p>
+          </div>
+        </div>
+        <div v-if="hasReviewLink" class="auth-review-card__actions">
+          <button type="button" :disabled="isSubmitting || pendingReviewRole !== null" @click="openReview('teacher')">
+            {{ pendingReviewRole === 'teacher' ? '正在进入…' : '进入教师工作台 →' }}
+          </button>
+          <button type="button" :disabled="isSubmitting || pendingReviewRole !== null" @click="openReview('student')">
+            {{ pendingReviewRole === 'student' ? '正在进入…' : '进入学生端 →' }}
+          </button>
+        </div>
+        <p v-if="reviewError" class="auth-error" role="alert">{{ reviewError }}</p>
+      </section>
+
+      <div class="auth-switch auth-access-footer">
         <span>没有账号？</span>
         <button class="text-action" type="button" @click="emit('navigate', 'register')">立即注册</button>
+        <button class="text-action" type="button" @click="emit('teacherRegistration')">教师邀请码</button>
       </div>
-
-      <button class="demo-entry-button" type="button" :disabled="isSubmitting" @click="enterDemo">
-        <span class="demo-entry-button__icon" aria-hidden="true">✦</span>
-        <span>
-          <strong>{{ isSubmitting ? '正在准备测试账号…' : '一键进入测试账号' }}</strong>
-          <small>已为评委准备测试账号，可直接体验无需注册</small>
-        </span>
-        <i aria-hidden="true">→</i>
-      </button>
-
-      <p class="auth-quote">“你的学习画像会随着学习持续进化。”</p>
     </section>
   </main>
 </template>

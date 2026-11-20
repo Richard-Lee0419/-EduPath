@@ -138,7 +138,7 @@ SSE 连接也支持 `access_token` 查询参数，用于浏览器 `EventSource` 
 
 ### POST `/api/auth/register`
 
-公开使用邮箱注册学生账号，并返回与登录接口一致的 JWT 会话。默认角色为 `student`。后端会自动生成内部用户名，注册成功后按 QQ SMTP 配置发送注册邮件。
+公开使用邮箱注册账号，并返回与登录接口一致的 JWT 会话。默认角色为 `student`。可选字段 `teacher_invite_code` 通过后端校验并在同一事务内兑换，省略时维持学生注册流程。有效邀请码仅能使用一次，可绑定邮箱，过期、已使用或邮箱不匹配均返回 400。后端生成内部用户名，注册成功后按 QQ SMTP 配置发送注册邮件。
 
 请求：
 
@@ -183,6 +183,23 @@ SSE 连接也支持 `access_token` 查询参数，用于浏览器 `EventSource` 
 ### POST `/api/auth/logout`
 
 退出登录。后端会将当前 access token 的 `jti` 写入黑名单，并撤销当前用户的 active refresh token。
+
+### POST `/api/auth/review`
+
+在开启评委入口的独立演示部署中，使用 `{ "code": "评委链接中的凭证", "role": "teacher" }` 登录演示教师或学生（`student`）。两个账号同属签发时建立的评委演示班。成功返回 `token`、`expires_at` 和 `user`，其中 `user.review` 为 `true`。会话有效期受链接截止时间限制，链接撤销后已签发会话也失效。入口关闭时返回 404，凭证无效或过期时返回 401。
+
+### 教师邀请码与评委链接管理
+
+以下接口仅管理员可操作。
+
+| 方法 | 接口 | 请求及结果 |
+|---|---|---|
+| POST | `/api/admin/access/teacher-invites` | `expires_in_hours` 可选，默认 72，范围 1–720。可选 `email` 绑定收件邮箱。返回 `code`、`expires_at`。 |
+| GET | `/api/admin/access/review-links` | 返回 `enabled` 及最近 25 条链接的 `id`、`class_id`、`class_name`、`expires_at`、`active`；列表不含凭证。 |
+| POST | `/api/admin/access/review-links` | `expires_in_hours` 可选，默认 72，范围 1–720。返回 `code` 和新链接的班级及有效期。 |
+| DELETE | `/api/admin/access/review-links/{id}` | 撤销链接和它的评委会话。 |
+
+评委链接格式为同一演示站点的 `/login#review=<code>`。签发回包只显示一次明文，前端会在读取链接后清理地址栏片段。
 
 ## 3. 课程接口
 

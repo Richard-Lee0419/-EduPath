@@ -33,13 +33,14 @@ export type KnowledgePoint = {
 
 export type LoginResult = {
   token: string;
-  refresh_token: string;
+  refresh_token?: string;
   expires_at: string;
   user: {
     id: number;
     username: string;
     email?: string;
     role: "student" | "teacher" | "admin";
+    review?: boolean;
   };
   email_delivery?: {
     sent: boolean;

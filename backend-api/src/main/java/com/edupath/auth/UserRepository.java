@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -72,18 +73,20 @@ public class UserRepository {
     }
 
     public long create(String username, String email, String passwordHash, String role, String status) {
-        jdbcTemplate.update(
-                """
-                INSERT INTO users (username, email, password_hash, role, status, created_at)
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                """,
-                username,
-                email,
-                passwordHash,
-                role,
-                status);
-        Long id = jdbcTemplate.queryForObject("SELECT MAX(id) FROM users", Long.class);
-        return id == null ? 0 : id;
+        GeneratedKeyHolder key = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            var statement = connection.prepareStatement("""
+                    INSERT INTO users (username, email, password_hash, role, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, new String[] {"id"});
+            statement.setString(1, username);
+            statement.setString(2, email);
+            statement.setString(3, passwordHash);
+            statement.setString(4, role);
+            statement.setString(5, status);
+            return statement;
+        }, key);
+        return key.getKey().longValue();
     }
 
     public List<UserRecord> list(String keyword, String role, String status, int page, int size) {

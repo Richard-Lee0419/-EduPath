@@ -8,6 +8,7 @@
  */
 
 import { apiBaseUrl } from '../api/http';
+import { accessToken } from '../api/session';
 import {
   buildEventPayload,
   deliverEvents,
@@ -17,7 +18,7 @@ import {
 import { getResearchContext } from './context';
 
 async function sendBatch(body: { events: Record<string, unknown>[] }): Promise<void> {
-  const token = typeof localStorage === 'undefined' ? null : localStorage.getItem('edupath_token');
+  const token = typeof window === 'undefined' ? null : accessToken();
   const response = await fetch(`${apiBaseUrl}/research/events`, {
     method: 'POST',
     headers: {

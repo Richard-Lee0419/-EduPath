@@ -4,6 +4,7 @@ import { getEvaluationReport } from '../api/evaluation';
 import { getCurrentProfile } from '../api/profile';
 import { listResources } from '../api/resource';
 import TaskCenter from './TaskCenter.vue';
+import AccountAccessPanel from '../components/AccountAccessPanel.vue';
 import type { EvaluationReport, Profile, ResourceCard, User, PageKey } from '../types';
 
 const props = defineProps<{
@@ -257,6 +258,7 @@ onMounted(async () => {
           </p>
         </article>
       </section>
+      <AccountAccessPanel v-if="user.role === 'admin'" />
     </main>
   </div>
 </template>

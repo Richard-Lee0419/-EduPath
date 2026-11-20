@@ -24,16 +24,19 @@ public class AuthFilter extends OncePerRequestFilter {
     private final JwtService jwtService;
     private final TokenRepository tokenRepository;
     private final UserRepository userRepository;
+    private final AccountAccessService accountAccess;
     private final ObjectMapper objectMapper;
 
     public AuthFilter(
             JwtService jwtService,
             TokenRepository tokenRepository,
             UserRepository userRepository,
+            AccountAccessService accountAccess,
             ObjectMapper objectMapper) {
         this.jwtService = jwtService;
         this.tokenRepository = tokenRepository;
         this.userRepository = userRepository;
+        this.accountAccess = accountAccess;
         this.objectMapper = objectMapper;
     }
 
@@ -51,10 +54,14 @@ public class AuthFilter extends OncePerRequestFilter {
             if (tokenRepository.isAccessTokenRevoked(principal.jti())) {
                 throw new IllegalArgumentException("登录状态已失效，请重新登录");
             }
-            userRepository
+            var user = userRepository
                     .findById(principal.userId())
-                    .filter(user -> "active".equals(user.status()))
+                    .filter(candidate -> "active".equals(candidate.status()))
                     .orElseThrow(() -> new IllegalArgumentException("用户不可用"));
+            if (principal.review() && (!user.role().equals(principal.role())
+                    || !accountAccess.isReviewSessionActive(user.id()))) {
+                throw new IllegalArgumentException("评委体验已结束，请重新打开有效的评委链接");
+            }
             AuthContext.set(principal);
             request.setAttribute("edupath.principal", principal);
             filterChain.doFilter(request, response);
@@ -82,6 +89,7 @@ public class AuthFilter extends OncePerRequestFilter {
         if ("/api/auth/login".equals(path)
                 || "/api/auth/register".equals(path)
                 || "/api/auth/refresh".equals(path)
+                || ("/api/auth/review".equals(path) && "POST".equalsIgnoreCase(method))
                 || "/api/system/health".equals(path)) {
             return true;
         }

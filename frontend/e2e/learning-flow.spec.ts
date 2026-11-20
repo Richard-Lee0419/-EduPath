@@ -401,3 +401,110 @@ test('teacher sees a Safety-refused upload as failed', async ({ page, request })
     expect((await request.get(`${backend}/api/agent/tasks/${resource.id}`, { headers: member.headers })).status()).toBe(404);
   });
 });
+
+test('administrator issues a teacher invite and the teacher opens the workbench', async ({ page, browser, baseURL }) => {
+  await login(page, 'admin', '123456');
+  await page.goto('/user-center');
+  const access = page.getByRole('region', { name: '教师邀请码与评委链接' });
+  const email = `teacher-${randomUUID().slice(0, 8)}@example.test`;
+  await access.getByLabel('教师邮箱（可选）').fill(email);
+  await access.getByRole('button', { name: '生成一次性邀请码' }).click();
+  const code = access.getByLabel('教师邀请码', { exact: true });
+  await expect(code).toHaveValue(/^ti_/);
+
+  const context = await browser.newContext({ baseURL });
+  try {
+    const teacher = await context.newPage();
+    await teacher.goto('/login');
+    await teacher.getByRole('button', { name: '教师邀请码', exact: true }).click();
+    const form = teacher.getByRole('form', { name: '教师邀请码注册' });
+    await form.getByLabel('教师邀请码').fill(await code.inputValue());
+    await form.getByLabel('邮箱').fill(email);
+    await form.getByPlaceholder('设置登录密码').fill('Classroom-preview-password');
+    await form.getByPlaceholder('再次输入密码').fill('Classroom-preview-password');
+    await form.getByRole('button', { name: '开通教师账号' }).click();
+    await expect(teacher).toHaveURL(/\/teacher-insights$/);
+    await expect(teacher.getByRole('region', { name: '班级课程管理' })).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
+test('review link opens both roles in the same course and keeps the administrator session separate', async ({ page, request }, info) => {
+  await login(page, 'admin', '123456');
+  const adminToken = await page.evaluate(() => localStorage.getItem('edupath_token'));
+  const config = await responseData(await request.get(`${backend}/api/admin/access/review-links`, {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  }));
+  const reviewer = await page.context().newPage();
+  try {
+    if (!config.enabled) {
+      await page.goto('/user-center');
+      await expect(page.getByText('在独立演示环境开启评委入口后，可以在这里生成链接。')).toBeVisible();
+      const response = await request.post(`${backend}/api/auth/review`, { data: { code: 'disabled', role: 'teacher' } });
+      expect(response.status()).toBe(404);
+      return;
+    }
+
+    await page.goto('/user-center');
+    const access = page.getByRole('region', { name: '教师邀请码与评委链接' });
+    const issued = page.waitForResponse(response => response.url().endsWith('/api/admin/access/review-links')
+      && response.request().method() === 'POST');
+    await access.getByRole('button', { name: '生成评委链接' }).click();
+    const link = await responseData(await issued);
+    const url = access.getByLabel('评委专属链接', { exact: true });
+    await expect(url).toHaveValue(/\/login#review=rv_/);
+    await reviewer.goto(await url.inputValue());
+    await expect(reviewer).toHaveURL(/\/login$/);
+    const reviewCard = reviewer.getByRole('region', { name: '评委体验' });
+    const submit = reviewer.getByRole('form', { name: '账号登录' }).getByRole('button', { name: /进入知径/ });
+    const box = await reviewCard.boundingBox();
+    const submitBox = await submit.boundingBox();
+    expect(box?.y).toBeGreaterThan(submitBox!.y + submitBox!.height);
+    await reviewer.screenshot({ path: info.outputPath('review-login-layout.png'), animations: 'disabled' });
+    for (const width of [390, 1024]) {
+      await reviewer.setViewportSize({ width, height: 844 });
+      await expect(reviewCard.getByRole('button', { name: /进入教师工作台/ })).toBeVisible();
+      expect(await reviewer.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    }
+    await reviewer.setViewportSize({ width: 1440, height: 1000 });
+    await reviewCard.getByRole('button', { name: /进入教师工作台/ }).click();
+    await expect(reviewer).toHaveURL(/\/teacher-insights$/);
+    await expect(reviewer.getByText('评委体验 · 教师端')).toBeVisible();
+    expect(await reviewer.evaluate(() => JSON.parse(localStorage.getItem('edupath_user')!).role)).toBe('admin');
+
+    const manager = reviewer.getByRole('region', { name: '班级课程管理' });
+    const name = `评委体验 · 光谱校准 ${randomUUID().slice(0, 6)}`;
+    await manager.getByLabel('课程名称').fill(name);
+    await manager.getByLabel('知识点（每行一项）').fill('Spectral calibration\nReference lamp');
+    await manager.getByRole('button', { name: '创建课程草稿' }).click();
+    await manager.getByLabel('选择 PDF（可多选）').setInputFiles({
+      name: '评委示例讲义.pdf',
+      mimeType: 'application/pdf',
+      buffer: coursePdf(
+        'This handout introduces a laboratory instrument.',
+        'Spectral calibration uses a reference lamp. The reference lamp provides a known wavelength.',
+      ),
+    });
+    await manager.getByRole('button', { name: '上传课程 PDF' }).click();
+    await expect(manager.getByRole('button', { name: '查看原文', exact: true })).toHaveCount(1);
+    await manager.getByRole('checkbox', { name: link.class_name }).check();
+    await manager.getByRole('button', { name: '发布课程', exact: true }).click();
+    await expect(manager.getByRole('button', { name: '撤回课程' })).toBeVisible();
+
+    await reviewer.getByRole('button', { name: '切换体验身份' }).click();
+    await reviewCard.getByRole('button', { name: /进入学生端/ }).click();
+    await expect(reviewer).toHaveURL(/\/learning-home$/);
+    const course = reviewer.getByRole('region', { name: '我的班级课程' }).getByRole('article').filter({ hasText: name });
+    await expect(course).toBeVisible();
+    await course.getByRole('link', { name: '进入课程' }).click();
+    await expect(reviewer.getByText('评委示例讲义.pdf', { exact: true })).toBeVisible();
+    await reviewer.getByRole('link', { name: '智能辅导' }).click();
+    await reviewer.locator('.tutor-composer input').fill('What is spectral calibration and what is a reference lamp?');
+    await reviewer.locator('.tutor-composer button[type=submit]').click();
+    await expect(reviewer.getByRole('button', { name: '查看 PDF 第 2 页' }).first()).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem('edupath_token'))).toBe(adminToken);
+  } finally {
+    await reviewer.close();
+  }
+});

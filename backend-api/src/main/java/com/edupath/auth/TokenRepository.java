@@ -111,7 +111,7 @@ public class TokenRepository {
         return timestamp == null ? null : timestamp.toInstant().atOffset(ZoneOffset.ofHours(8));
     }
 
-    private String hash(String value) {
+    static String hash(String value) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             return Base64.getUrlEncoder()

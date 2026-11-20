@@ -326,7 +326,7 @@ public class QuizService {
     public void updateQuestionBankStatus(long id, QuestionBankStatusUpdateRequest request) {
         int courseId = quizRepository.findQuestionBankCourse(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "题目不存在: " + id));
-        if (courseAccess.isClassCourse(courseId) && !courseAccess.canManage(courseId)) {
+        if ((AuthContext.requirePrincipal().review() || courseAccess.isClassCourse(courseId)) && !courseAccess.canManage(courseId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "题目不存在或当前账号无权访问");
         }
         int updated = quizRepository.updateQuestionBankStatus(id, request.status());

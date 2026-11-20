@@ -1,4 +1,5 @@
 import type { ApiResponse } from '@/types/api';
+import { accessToken } from './session';
 
 export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
 
@@ -28,10 +29,11 @@ export async function apiGet<T>(path: string, params?: Record<string, unknown>):
   return unwrapApiResponse<T>(response);
 }
 
-export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
+export async function apiPost<T>(path: string, body?: unknown, options: { anonymous?: boolean } = {}): Promise<T> {
+  const headers = { 'Content-Type': 'application/json' };
   const response = await fetch(`${apiBaseUrl}${path}`, {
     method: 'POST',
-    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+    headers: options.anonymous ? headers : buildAuthHeaders(headers),
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   return unwrapApiResponse<T>(response);
@@ -70,7 +72,7 @@ export async function apiGetBlob(path: string): Promise<Blob> {
 }
 
 function buildAuthHeaders(headers?: Record<string, string>) {
-  const token = localStorage.getItem('edupath_token');
+  const token = accessToken();
   return {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(headers || {}),

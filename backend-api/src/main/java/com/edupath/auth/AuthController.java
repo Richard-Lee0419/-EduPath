@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -14,6 +15,7 @@ import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.Locale;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -32,6 +34,7 @@ public class AuthController {
     private final TokenRepository tokenRepository;
     private final EmailService emailService;
     private final DemoClassEnrollmentService demoClassEnrollmentService;
+    private final AccountAccessService accountAccess;
     private final long refreshTtlSeconds;
     private final SecureRandom secureRandom = new SecureRandom();
 
@@ -42,6 +45,7 @@ public class AuthController {
             TokenRepository tokenRepository,
             EmailService emailService,
             DemoClassEnrollmentService demoClassEnrollmentService,
+            AccountAccessService accountAccess,
             @Value("${edupath.jwt.refresh-ttl-seconds:604800}") long refreshTtlSeconds) {
         this.userRepository = userRepository;
         this.passwordService = passwordService;
@@ -49,6 +53,7 @@ public class AuthController {
         this.tokenRepository = tokenRepository;
         this.emailService = emailService;
         this.demoClassEnrollmentService = demoClassEnrollmentService;
+        this.accountAccess = accountAccess;
         this.refreshTtlSeconds = refreshTtlSeconds;
     }
 
@@ -60,27 +65,48 @@ public class AuthController {
                 .findByUsernameOrEmail(loginName)
                 .filter(candidate -> "active".equals(candidate.status()))
                 .filter(candidate -> passwordService.verify(request.password(), candidate.passwordHash()))
+                .filter(candidate -> !accountAccess.isReviewUser(candidate.id()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "用户名、邮箱或密码错误"));
         userRepository.updateLastLogin(user.id());
         return ApiResponse.success(issueLoginResult(user));
     }
 
     @PostMapping("/register")
-    @Operation(summary = "公开注册学生账号并返回 JWT")
+    @Operation(summary = "注册学习账号或兑换教师邀请码")
     public ApiResponse<LoginResult> register(@Valid @RequestBody RegisterRequest request) {
         String email = normalizeEmail(request.email());
         if (userRepository.findByEmail(email).isPresent()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "邮箱已注册");
         }
         String username = uniqueUsernameForEmail(email);
-        long id = userRepository.create(username, email, passwordService.hash(request.password()), "student", "active");
-        demoClassEnrollmentService.enrollStudent(id);
+        String passwordHash = passwordService.hash(request.password());
+        long id;
+        try {
+            if (request.teacherInviteCode() == null) {
+                id = userRepository.create(username, email, passwordHash, "student", "active");
+                demoClassEnrollmentService.enrollStudent(id);
+            } else {
+                id = accountAccess.registerTeacher(username, email, passwordHash, request.teacherInviteCode().strip());
+            }
+        } catch (DuplicateKeyException exception) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "注册信息已被使用，请检查邮箱后重试");
+        }
         UserRepository.UserRecord user = userRepository.findById(id).orElseThrow();
         EmailService.EmailDelivery emailDelivery = emailService.sendRegistrationEmail(user.email(), user.username());
         if (emailDelivery.sent()) {
             userRepository.markEmailVerificationSent(user.id());
         }
         return ApiResponse.success(issueLoginResult(user, emailDelivery));
+    }
+
+    @PostMapping("/review")
+    @Operation(summary = "通过评委专属链接进入演示班")
+    public ApiResponse<LoginResult> startReview(@Valid @RequestBody ReviewRequest request) {
+        var session = accountAccess.authenticateReviewer(request.code().strip(), request.role());
+        JwtService.ReviewToken token = jwtService.issueReview(session.user(), session.expiresAt());
+        userRepository.updateLastLogin(session.user().id());
+        return ApiResponse.success(new LoginResult(token.value(), null, token.expiresAt().atOffset(ZoneOffset.ofHours(8)),
+                toDto(session.user(), true), null));
     }
 
     @PostMapping("/logout")
@@ -117,7 +143,7 @@ public class AuthController {
                 .findById(principal.userId())
                 .filter(candidate -> "active".equals(candidate.status()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "用户不可用"));
-        return ApiResponse.success(toDto(user));
+        return ApiResponse.success(toDto(user, principal.review()));
     }
 
     private LoginResult issueLoginResult(UserRepository.UserRecord user) {
@@ -133,7 +159,7 @@ public class AuthController {
                 accessToken,
                 refreshToken,
                 OffsetDateTime.ofInstant(refreshExpiresAt, ZoneOffset.ofHours(8)),
-                toDto(user),
+                toDto(user, false),
                 emailDelivery);
     }
 
@@ -143,8 +169,8 @@ public class AuthController {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
-    private UserDto toDto(UserRepository.UserRecord user) {
-        return new UserDto(user.id(), user.username(), user.role(), user.email());
+    private UserDto toDto(UserRepository.UserRecord user, boolean review) {
+        return new UserDto(user.id(), user.username(), user.role(), user.email(), review ? Boolean.TRUE : null);
     }
 
     private String normalizeEmail(String email) {
@@ -170,7 +196,10 @@ public class AuthController {
 
     public record LoginRequest(@NotBlank String username, @NotBlank String password) {}
 
-    public record RegisterRequest(@NotBlank @Email String email, @NotBlank String password, String name) {}
+    public record RegisterRequest(@NotBlank @Email @Size(max = 255) String email, @NotBlank String password,
+                                  String name, @Size(max = 80) String teacherInviteCode) {}
+
+    public record ReviewRequest(@NotBlank @Size(max = 80) String code, @NotBlank String role) {}
 
     public record RefreshRequest(@NotBlank String refreshToken) {}
 
@@ -181,5 +210,5 @@ public class AuthController {
             UserDto user,
             EmailService.EmailDelivery emailDelivery) {}
 
-    public record UserDto(long id, String username, String role, String email) {}
+    public record UserDto(long id, String username, String role, String email, Boolean review) {}
 }

@@ -7769,35 +7769,168 @@ label,
   color: #a64c28;
 }
 
-.demo-entry-button {
-  display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
+.auth-access-page {
+  position: relative;
+}
+
+.auth-access-page .auth-welcome-exit {
+  position: absolute;
+}
+
+.auth-access-page .auth-form-panel {
+  row-gap: 8px;
+  padding: clamp(24px, 3.1vw, 42px);
+}
+
+.auth-access-page .auth-brand-lockup {
+  margin-bottom: var(--space-6);
+}
+
+.auth-access-page .auth-brand-lockup p {
+  text-wrap: balance;
+}
+
+.auth-access-page .auth-form {
+  gap: 14px;
+  margin-top: var(--space-4);
+}
+
+.auth-access-page .auth-form input,
+.auth-access-page .primary-action.wide {
   width: 100%;
-  margin-top: var(--space-5);
+  min-height: 52px;
+}
+
+.auth-access-page .password-field input {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.auth-access-page .auth-access-footer {
+  margin-top: 12px;
+}
+
+.auth-review-card {
+  display: grid;
+  gap: 10px;
+  margin-top: var(--space-3);
   border: 1px solid rgba(18, 128, 111, 0.22);
   border-radius: 16px;
-  padding: 13px 16px;
+  padding: 13px;
   background: linear-gradient(135deg, rgba(18, 128, 111, 0.1), rgba(255, 255, 255, 0.72));
-  color: var(--ink);
-  cursor: pointer;
-  text-align: left;
-  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
 }
 
-.demo-entry-button:hover:not(:disabled) {
-  transform: translateY(-2px);
-  border-color: rgba(18, 128, 111, 0.42);
-  box-shadow: 0 14px 28px rgba(18, 128, 111, 0.12);
+.auth-review-card__intro {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-.demo-entry-button:disabled { cursor: wait; opacity: 0.65; }
-.demo-entry-button__icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 50%; background: rgba(18, 128, 111, 0.14); color: var(--teal); font-size: 1.15rem; }
-.demo-entry-button > span:nth-child(2) { display: grid; gap: 3px; min-width: 0; }
-.demo-entry-button strong { color: var(--teal-dark); font-size: 0.95rem; }
-.demo-entry-button small { color: rgba(28, 45, 42, 0.58); font-size: 0.76rem; }
-.demo-entry-button i { color: var(--teal); font-size: 1.25rem; font-style: normal; }
+.auth-review-card__icon {
+  display: grid;
+  flex: 0 0 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(18, 128, 111, 0.14);
+  color: var(--teal);
+}
+
+.auth-review-card h2 {
+  margin: 0;
+  color: var(--color-primary-deep);
+  font-size: 1rem;
+}
+
+.auth-review-card__intro p {
+  margin: 3px 0 0;
+  color: #49655d;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.auth-review-card .auth-error {
+  margin: 0;
+}
+
+.auth-review-card__actions,
+.auth-register-roles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.auth-register-roles {
+  margin-top: var(--space-3);
+}
+
+.auth-review-card__actions button,
+.auth-register-roles button {
+  min-height: 42px;
+  padding: 7px 8px;
+  border: 1px solid rgba(18, 128, 111, 0.28);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.83);
+  color: var(--color-primary-deep);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.auth-review-card__actions button:first-child,
+.auth-register-roles button[aria-pressed="true"] {
+  background: var(--color-primary-deep);
+  color: #fff;
+}
+
+.auth-review-card__actions button:hover:not(:disabled),
+.auth-register-roles button:hover:not(:disabled) {
+  box-shadow: 0 0 0 2px rgba(18, 128, 111, 0.16);
+}
+
+.auth-review-session {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  max-width: 1180px;
+  margin: 0 auto 14px;
+  padding: 8px 14px;
+  border: 1px solid rgba(18, 128, 111, 0.18);
+  border-radius: 12px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary-deep);
+  font-size: 0.86rem;
+  font-weight: 760;
+}
+
+@media (max-width: 980px) {
+  .auth-page--target.auth-access-page {
+    grid-template-columns: 1fr !important;
+    gap: 18px;
+    padding: 16px 0 24px;
+  }
+
+  .auth-page--target.auth-access-page .auth-form-panel,
+  .auth-page--target.auth-access-page .auth-visual {
+    width: min(100% - 28px, 520px);
+    margin: 0 auto;
+  }
+
+  .auth-page--target.auth-access-page .auth-form-panel {
+    order: 1;
+    min-height: auto;
+  }
+
+  .auth-page--target.auth-access-page .auth-visual {
+    order: 2;
+    min-height: 220px;
+    height: 220px;
+    border-radius: 20px;
+  }
+}
 
 .home-next-step {
   display: grid;

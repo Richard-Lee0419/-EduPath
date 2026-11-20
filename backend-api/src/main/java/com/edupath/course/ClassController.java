@@ -1,6 +1,7 @@
 package com.edupath.course;
 
 import com.edupath.auth.AuthContext;
+import com.edupath.auth.AccountAccessService;
 import com.edupath.auth.RoleGuard;
 import com.edupath.auth.UserRepository;
 import com.edupath.common.ApiResponse;
@@ -30,18 +31,21 @@ public class ClassController {
     private final RoleGuard roleGuard;
     private final CourseAccess courseAccess;
     private final ClassInsightService classInsightService;
+    private final AccountAccessService accountAccess;
 
     public ClassController(
             ClassRepository classRepository,
             UserRepository userRepository,
             RoleGuard roleGuard,
             CourseAccess courseAccess,
-            ClassInsightService classInsightService) {
+            ClassInsightService classInsightService,
+            AccountAccessService accountAccess) {
         this.classRepository = classRepository;
         this.userRepository = userRepository;
         this.roleGuard = roleGuard;
         this.courseAccess = courseAccess;
         this.classInsightService = classInsightService;
+        this.accountAccess = accountAccess;
     }
 
     @GetMapping
@@ -103,6 +107,10 @@ public class ClassController {
                 userRepository.findByUsername(request.username() == null ? "" : request.username().strip())
                         .filter(user -> "active".equals(user.status()) && "student".equals(user.role()) && "student".equals(role));
         long userId = target.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "找不到对应的班级成员账号")).id();
+        var actor = AuthContext.requirePrincipal();
+        if (actor.review() && (!"student".equals(role) || !accountAccess.isPairedReviewMember(actor.userId(), classId, userId))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "评委演示班仅包含当前链接分配的学生账号");
+        }
         classRepository.addMember(classId, userId, role);
         return ApiResponse.success(classRepository.members(classId));
     }

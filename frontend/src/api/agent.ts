@@ -1,5 +1,5 @@
-import { apiPost } from './http';
-import { apiBaseUrl } from './http';
+import { apiBaseUrl, apiPost } from './http';
+import { accessToken } from './session';
 import type { ResourceType, TaskCreated } from '@/types/api';
 export { getAgentTask } from './task';
 
@@ -15,7 +15,7 @@ export function createResourceTask(payload: {
 }
 
 export function createTaskStreamUrl(taskId: string) {
-  const token = localStorage.getItem('edupath_token');
+  const token = accessToken();
   const query = token ? `?access_token=${encodeURIComponent(token)}` : '';
   return `${apiBaseUrl}/agent/tasks/${taskId}/stream${query}`;
 }
