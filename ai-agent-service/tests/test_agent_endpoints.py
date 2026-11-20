@@ -3,10 +3,9 @@ from io import BytesIO
 import json
 import time
 
-import pytest
 from fastapi.testclient import TestClient
+from pptx import Presentation
 
-from app.api.kb_api import _decode_document_text
 from app.agents.orchestrator_agent import orchestrator
 from app.core.config import Settings
 from app.main import app
@@ -438,8 +437,7 @@ def test_uploaded_document_is_ingested_into_rag_search():
 
 
 def test_pptx_document_text_is_extracted_for_ingest():
-    pptx = pytest.importorskip("pptx")
-    presentation = pptx.Presentation()
+    presentation = Presentation()
     slide = presentation.slides.add_slide(presentation.slide_layouts[5])
     slide.shapes.title.text = "递归调用栈课件"
     text_box = slide.shapes.add_textbox(0, 0, 4000000, 1000000)
@@ -447,12 +445,22 @@ def test_pptx_document_text_is_extracted_for_ingest():
     buffer = BytesIO()
     presentation.save(buffer)
 
-    text = _decode_document_text(
-        b64encode(buffer.getvalue()).decode("ascii"),
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "recursion-stack.pptx",
+    response = client.post(
+        "/kb/ingest",
+        json={
+            "document_id": 9005,
+            "course_id": 9905,
+            "filename": "recursion-stack.pptx",
+            "content_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "content_base64": b64encode(buffer.getvalue()).decode("ascii"),
+        },
     )
 
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["parse_status"] == "parsed"
+    assert result["index_status"] == "indexed"
+    text = "\n".join(chunk["content"] for chunk in result["chunks"])
     assert "递归调用栈课件" in text
     assert "新的栈帧" in text
 
