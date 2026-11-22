@@ -2,7 +2,7 @@
 
 面向高校课程学习的 Web 应用，内置《数据结构与算法》和《计算机组成原理》。学生可以根据学习画像获取资源和路径、查看生成内容的课程证据，再用测验结果调整学习计划，也可以上传自己的 PDF 讲义。教师可以开设班级课程、上传讲义，并通过班级洞察和教学任务跟进学习进度。
 
-这是软件杯 A3 团队项目的个人公开版本，由团队快照整理后持续维护。Richard-Lee0419 主要负责前端/UI与 AI 模块，并参与后端；部署主要由队友完成。代码基础、个人扩展和代表性提交见 [贡献说明](CONTRIBUTIONS.md)。
+
 
 **快速入口：** [核心流程视频](https://github.com/Richard-Lee0419/-EduPath/releases/download/demo-video-2026-10-11/edupath-demo.mp4) · [班级课程与个人 PDF](#班级课程与个人-pdf) · [演示说明](docs/demo-guide.md) · [验证记录](docs/validation-report.md) · [设计取舍](docs/engineering-decisions.md) · [原在线实例](https://8.136.194.87/) · [旧版介绍存档](docs/history/README-before-portfolio-review.md)
 
