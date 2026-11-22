@@ -90,6 +90,8 @@ public class AuthFilter extends OncePerRequestFilter {
                 || "/api/auth/register".equals(path)
                 || "/api/auth/refresh".equals(path)
                 || ("/api/auth/review".equals(path) && "POST".equalsIgnoreCase(method))
+                || ("/api/auth/review/one-click".equals(path)
+                        && Set.of("GET", "POST").contains(method))
                 || "/api/system/health".equals(path)) {
             return true;
         }

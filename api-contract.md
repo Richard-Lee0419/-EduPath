@@ -188,6 +188,10 @@ SSE 连接也支持 `access_token` 查询参数，用于浏览器 `EventSource` 
 
 在开启评委入口的独立演示部署中，使用 `{ "code": "评委链接中的凭证", "role": "teacher" }` 登录演示教师或学生（`student`）。两个账号同属签发时建立的评委演示班。成功返回 `token`、`expires_at` 和 `user`，其中 `user.review` 为 `true`。会话有效期受链接截止时间限制，链接撤销后已签发会话也失效。入口关闭时返回 404，凭证无效或过期时返回 401。
 
+### GET / POST `/api/auth/review/one-click`
+
+演示站的 `GET /api/auth/review/one-click` 返回 `{ "enabled": true }` 时，登录页显示免注册的师生体验入口。首次点击调用同路径的 POST，传入 `{ "role": "teacher" }` 或 `{ "role": "student" }`，返回 `code`、`expires_at` 和上面的登录结构 `session`。此会话创建一对独立师生账号和一个演示班，有效期为 4 小时。同一浏览器标签页切换身份时，使用同一个 `code` 调用 `POST /api/auth/review`，保留已发布的班级课程。功能关闭时 POST 返回 404，每日的新建名额用完时返回 429。
+
 ### 教师邀请码与评委链接管理
 
 以下接口仅管理员可操作。

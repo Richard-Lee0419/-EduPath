@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { enterReview, login } from '../api/auth';
+import { onMounted, ref } from 'vue';
+import { enterReview, getReviewAvailability, login } from '../api/auth';
 import wordmarkUrl from '../assets/images/edupath-wordmark-white.png';
 import AuthLearningVisual from '../components/AuthLearningVisual.vue';
 import ExitButton from '../components/ExitButton.vue';
@@ -22,6 +22,15 @@ const isSubmitting = ref(false);
 const showPassword = ref(false);
 const reviewError = ref('');
 const pendingReviewRole = ref<ReviewRole | null>(null);
+const oneClickReview = ref(false);
+
+onMounted(async () => {
+  try {
+    oneClickReview.value = (await getReviewAvailability()).enabled === true;
+  } catch {
+    oneClickReview.value = false;
+  }
+});
 
 const openReview = async (role: ReviewRole) => {
   if (isSubmitting.value || pendingReviewRole.value) return;
@@ -160,12 +169,12 @@ const submit = async () => {
           <span class="auth-review-card__icon" aria-hidden="true">✦</span>
           <div>
             <h2>评委体验</h2>
-            <p>{{ hasReviewLink
+            <p>{{ hasReviewLink || oneClickReview
               ? '在同一演示班级体验教师发布课程和学生学习。'
               : '请使用参赛材料中的评委专属链接。' }}</p>
           </div>
         </div>
-        <div v-if="hasReviewLink" class="auth-review-card__actions">
+        <div v-if="hasReviewLink || oneClickReview" class="auth-review-card__actions">
           <button type="button" :disabled="isSubmitting || pendingReviewRole !== null" @click="openReview('teacher')">
             {{ pendingReviewRole === 'teacher' ? '正在进入…' : '进入教师工作台 →' }}
           </button>

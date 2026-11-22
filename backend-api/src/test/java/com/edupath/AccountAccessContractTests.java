@@ -28,6 +28,8 @@ import org.springframework.test.web.servlet.ResultActions;
 
 @SpringBootTest(properties = {
     "edupath.review-access.enabled=true",
+    "edupath.review-access.one-click-enabled=true",
+    "edupath.review-access.one-click-daily-limit=2",
     "edupath.demo-mode.enabled=false",
     "spring.datasource.url=jdbc:h2:mem:account_access_test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1"
 })
@@ -56,6 +58,30 @@ class AccountAccessContractTests {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM teacher_invites WHERE code_hash = ?", Integer.class, code)).isZero();
         request("/api/auth/register", Map.of("email", address(), "password", "reg-test", "role", "teacher"), null)
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.user.role").value("student"));
+    }
+
+    @Test
+    void oneClickProvidesAnIsolatedPairAndLimitsNewSessions() throws Exception {
+        String path = "/api/auth/review/one-click";
+        mvc.perform(get(path)).andExpect(status().isOk()).andExpect(jsonPath("$.data.enabled").value(true));
+        request(path, Map.of("role", "admin"), null).andExpect(status().isBadRequest());
+        JsonNode visit = data(request(path, Map.of("role", "teacher"), null));
+        JsonNode teacher = visit.path("session");
+        assertThat(teacher.path("user").path("role").asText()).isEqualTo("teacher");
+        assertThat(teacher.path("user").path("review").asBoolean()).isTrue();
+        String teacherToken = teacher.path("token").asText();
+        JsonNode student = data(request("/api/auth/review",
+                Map.of("code", visit.path("code").asText(), "role", "student"), null));
+        long classId = data(mvc.perform(get("/api/classes").header("Authorization", bearer(teacherToken))))
+                .get(0).path("id").asLong();
+        mvc.perform(get("/api/classes/{id}/members", classId).header("Authorization", bearer(teacherToken)))
+                .andExpect(jsonPath("$.data[0].user_id").value(student.path("user").path("id").asInt()));
+
+        JsonNode another = data(request(path, Map.of("role", "teacher"), null));
+        String otherToken = another.path("session").path("token").asText();
+        mvc.perform(get("/api/classes/{id}/members", classId).header("Authorization", bearer(otherToken)))
+                .andExpect(status().isForbidden());
+        request(path, Map.of("role", "student"), null).andExpect(status().isTooManyRequests());
     }
 
     @Test

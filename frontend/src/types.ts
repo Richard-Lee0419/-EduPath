@@ -10,6 +10,7 @@ export type PageKey =
   | 'learningPath'
   | 'knowledgeBase'
   | 'tutor'
+  | 'personalPdf'
   | 'quiz'
   | 'evaluation'
   | 'teacherInsights'

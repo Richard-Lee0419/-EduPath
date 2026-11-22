@@ -61,6 +61,8 @@ edupath:
     class-name: ${DEMO_CLASS_NAME:测试2班}
   review-access:
     enabled: ${REVIEW_ACCESS_ENABLED:false}
+    one-click-enabled: ${REVIEW_ONE_CLICK_ENABLED:false}
+    one-click-daily-limit: ${REVIEW_ONE_CLICK_DAILY_LIMIT:50}
   kb:
     max-upload-bytes: ${KB_MAX_UPLOAD_BYTES:20971520}
   jwt:

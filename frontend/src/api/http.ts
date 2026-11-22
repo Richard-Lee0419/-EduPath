@@ -15,7 +15,9 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return unwrapApiResponse<T>(response);
 }
 
-export async function apiGet<T>(path: string, params?: Record<string, unknown>): Promise<T> {
+export async function apiGet<T>(
+  path: string, params?: Record<string, unknown>, options: { anonymous?: boolean } = {},
+): Promise<T> {
   const url = new URL(`${apiBaseUrl}${path}`, window.location.origin);
   Object.entries(params || {}).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== '') {
@@ -24,7 +26,7 @@ export async function apiGet<T>(path: string, params?: Record<string, unknown>):
   });
 
   const response = await fetch(url, {
-    headers: buildAuthHeaders(),
+    headers: options.anonymous ? {} : buildAuthHeaders(),
   });
   return unwrapApiResponse<T>(response);
 }

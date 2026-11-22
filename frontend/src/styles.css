@@ -7906,6 +7906,11 @@ label,
   font-weight: 760;
 }
 
+.personal-pdf-page {
+  max-width: 1100px;
+  margin: 24px auto;
+}
+
 @media (max-width: 980px) {
   .auth-page--target.auth-access-page {
     grid-template-columns: 1fr !important;

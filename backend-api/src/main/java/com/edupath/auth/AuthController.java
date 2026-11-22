@@ -18,10 +18,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.CacheControl;
+import org.springframework.http.ResponseEntity;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -102,11 +105,30 @@ public class AuthController {
     @PostMapping("/review")
     @Operation(summary = "通过评委专属链接进入演示班")
     public ApiResponse<LoginResult> startReview(@Valid @RequestBody ReviewRequest request) {
-        var session = accountAccess.authenticateReviewer(request.code().strip(), request.role());
+        return ApiResponse.success(reviewLogin(request.code().strip(), request.role()));
+    }
+
+    @GetMapping("/review/one-click")
+    public ResponseEntity<ApiResponse<ReviewAvailability>> reviewAvailability() {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(ApiResponse.success(new ReviewAvailability(accountAccess.oneClickAvailable())));
+    }
+
+    @PostMapping("/review/one-click")
+    public ResponseEntity<ApiResponse<OneClickReviewResult>> startOneClickReview(
+            @Valid @RequestBody OneClickReviewRequest request) {
+        var grant = accountAccess.issueOneClickReview(request.role());
+        var session = reviewLogin(grant.code(), request.role());
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(ApiResponse.success(new OneClickReviewResult(grant.code(), grant.expiresAt(), session)));
+    }
+
+    private LoginResult reviewLogin(String code, String role) {
+        var session = accountAccess.authenticateReviewer(code, role);
         JwtService.ReviewToken token = jwtService.issueReview(session.user(), session.expiresAt());
         userRepository.updateLastLogin(session.user().id());
-        return ApiResponse.success(new LoginResult(token.value(), null, token.expiresAt().atOffset(ZoneOffset.ofHours(8)),
-                toDto(session.user(), true), null));
+        return new LoginResult(token.value(), null, token.expiresAt().atOffset(ZoneOffset.ofHours(8)),
+                toDto(session.user(), true), null);
     }
 
     @PostMapping("/logout")
@@ -200,6 +222,9 @@ public class AuthController {
                                   String name, @Size(max = 80) String teacherInviteCode) {}
 
     public record ReviewRequest(@NotBlank @Size(max = 80) String code, @NotBlank String role) {}
+    public record ReviewAvailability(boolean enabled) {}
+    public record OneClickReviewRequest(@NotBlank String role) {}
+    public record OneClickReviewResult(String code, Instant expiresAt, LoginResult session) {}
 
     public record RefreshRequest(@NotBlank String refreshToken) {}
 

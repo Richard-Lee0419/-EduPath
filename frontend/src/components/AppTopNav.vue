@@ -5,7 +5,7 @@ import UserAvatarButton from './UserAvatarButton.vue';
 
 type FunctionalPageKey = Extract<
   PageKey,
-  'learningHome' | 'profile' | 'resources' | 'resourceCenter' | 'learningPath' | 'knowledgeBase' | 'tutor' | 'quiz' | 'evaluation' | 'teacherInsights'
+  'learningHome' | 'profile' | 'resources' | 'resourceCenter' | 'learningPath' | 'knowledgeBase' | 'tutor' | 'personalPdf' | 'quiz' | 'evaluation' | 'teacherInsights'
 >;
 
 defineProps<{
@@ -33,7 +33,7 @@ const baseNavItems: Array<{ key: FunctionalPageKey; label: string }> = [
 
 const navItemsForUser = (user: User) => user.role === 'teacher' || user.role === 'admin'
   ? [...baseNavItems, { key: 'teacherInsights' as const, label: '教师工作台' }]
-  : baseNavItems;
+  : [...baseNavItems, { key: 'personalPdf' as const, label: '个人 PDF' }];
 </script>
 
 <template>

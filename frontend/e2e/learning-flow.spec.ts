@@ -508,3 +508,31 @@ test('review link opens both roles in the same course and keeps the administrato
     await reviewer.close();
   }
 });
+
+test('ordinary login offers both review roles when the demo environment allows one click', async ({ page, request }) => {
+  const availability = await responseData(await request.get(`${backend}/api/auth/review/one-click`));
+  await page.goto('/login');
+  const review = page.getByRole('region', { name: '评委体验' });
+  const teacher = review.getByRole('button', { name: /进入教师工作台/ });
+  if (!availability.enabled) {
+    await expect(teacher).toHaveCount(0);
+    const blocked = await request.post(`${backend}/api/auth/review/one-click`, { data: { role: 'teacher' } });
+    expect(blocked.status()).toBe(404);
+    return;
+  }
+
+  await teacher.click();
+  await expect(page).toHaveURL(/\/teacher-insights$/);
+  await expect(page.getByRole('region', { name: '班级课程管理' })).toBeVisible();
+  await page.getByRole('button', { name: '切换体验身份' }).click();
+  const response = page.waitForResponse(response => response.url().endsWith('/api/auth/review') &&
+    response.request().method() === 'POST');
+  await review.getByRole('button', { name: /进入学生端/ }).click();
+  expect((await response).ok()).toBeTruthy();
+  await expect(page).toHaveURL(/\/learning-home$/);
+  await page.getByRole('navigation', { name: '学习功能导航' }).getByRole('button', { name: '个人 PDF' }).click();
+  await expect(page).toHaveURL(/\/personal-pdf$/);
+  await expect(page.getByLabel('上传课程 PDF')).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel('上传课程 PDF')).toBeVisible();
+});

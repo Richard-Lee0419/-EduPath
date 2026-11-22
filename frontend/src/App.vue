@@ -2,7 +2,7 @@
 import { defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { Component } from 'vue';
 import { getStoredUser, logout } from './api/auth';
-import { captureReviewLink, reviewCode } from './api/session';
+import { captureReviewLink, reviewCodeForEntry } from './api/session';
 import AppShell from './components/AppShell.vue';
 import AsyncPageLoading from './components/AsyncPageLoading.vue';
 import Dashboard from './pages/Dashboard.vue';
@@ -27,13 +27,14 @@ const Quiz = lazyPage(() => import('./pages/Quiz.vue'));
 const ResourceGenerate = lazyPage(() => import('./pages/ResourceGenerate.vue'));
 const ResourceCenter = lazyPage(() => import('./pages/ResourceCenter.vue'));
 const Tutor = lazyPage(() => import('./pages/Tutor.vue'));
+const PersonalPdfTutor = lazyPage(() => import('./components/PersonalPdfTutor.vue'));
 const TeacherInsights = lazyPage(() => import('./pages/TeacherInsights.vue'));
 const TaskCenter = lazyPage(() => import('./pages/TaskCenter.vue'));
 const UserCenter = lazyPage(() => import('./pages/UserCenter.vue'));
 
 captureReviewLink();
 const user = ref<User | null>(getStoredUser());
-const hasReviewLink = ref(Boolean(reviewCode()));
+const hasReviewLink = ref(Boolean(reviewCodeForEntry()));
 const teacherRegistration = ref(false);
 const lastUserCenterSource = ref<PageKey>('dashboard');
 const initialProfileIntent = ref<{ text: string; nonce: number } | null>(null);
@@ -50,6 +51,7 @@ const pageRoutes: Record<PageKey, string> = {
   learningPath: '/learning-path',
   knowledgeBase: '/knowledge-base',
   tutor: '/tutor',
+  personalPdf: '/personal-pdf',
   quiz: '/quiz',
   evaluation: '/evaluation',
   teacherInsights: '/teacher-insights',
@@ -71,6 +73,7 @@ const pathToPage = new Map<string, PageKey>([
   ['/knowledge-base', 'knowledgeBase'],
   ['/knowledge-upload', 'knowledgeBase'],
   ['/tutor', 'tutor'],
+  ['/personal-pdf', 'personalPdf'],
   ['/quiz', 'quiz'],
   ['/evaluation', 'evaluation'],
   ['/teacher-insights', 'teacherInsights'],
@@ -81,7 +84,11 @@ const pathToPage = new Map<string, PageKey>([
 const pageFromPath = (path: string): PageKey => pathToPage.get(path) ?? 'dashboard';
 const isPublicPage = (page: PageKey) => page === 'welcome' || page === 'login' || page === 'register';
 const isAuthPage = (page: PageKey) => page === 'login' || page === 'register';
-const canAccessPage = (page: PageKey) => page !== 'teacherInsights' || user.value?.role === 'teacher' || user.value?.role === 'admin';
+const canAccessPage = (page: PageKey) => {
+  if (page === 'teacherInsights') return user.value?.role === 'teacher' || user.value?.role === 'admin';
+  if (page === 'personalPdf') return user.value?.role === 'student';
+  return true;
+};
 
 const routeFromPage = (page: PageKey) => pageRoutes[page];
 
@@ -178,7 +185,7 @@ const openTeacherRegistration = () => {
 
 const handleAuthenticated = (authenticatedUser: User, next?: PageKey) => {
   user.value = authenticatedUser;
-  hasReviewLink.value = Boolean(reviewCode());
+  hasReviewLink.value = Boolean(reviewCodeForEntry());
   const landing = authenticatedUser.role === 'teacher' ? 'teacherInsights' : 'learningHome';
   setCurrentPage(authenticatedUser.review ? landing : next ?? 'dashboard', { replace: true });
 };
@@ -190,6 +197,7 @@ const handleLogout = async () => {
     // The local session is already cleared, including when the server's grant has expired.
   } finally {
     user.value = null;
+    hasReviewLink.value = Boolean(reviewCodeForEntry());
     setCurrentPage('login', { replace: true });
   }
 };
@@ -197,7 +205,7 @@ const handleLogout = async () => {
 const handleReviewLink = () => {
   if (!captureReviewLink()) return false;
   user.value = getStoredUser();
-  hasReviewLink.value = Boolean(reviewCode());
+  hasReviewLink.value = Boolean(reviewCodeForEntry());
   setCurrentPage(user.value ? 'dashboard' : 'login', { replace: true });
   return true;
 };
@@ -283,6 +291,7 @@ onBeforeUnmount(() => {
     <LearningPath v-else-if="currentPage === 'learningPath'" @navigate="navigate" />
     <KnowledgeBase v-else-if="currentPage === 'knowledgeBase'" :user="user" />
     <Tutor v-else-if="currentPage === 'tutor'" :show-personal-pdf="user?.role === 'student'" @navigate="navigate" />
+    <PersonalPdfTutor v-else-if="currentPage === 'personalPdf'" class="personal-pdf-page" />
     <Quiz v-else-if="currentPage === 'quiz'" />
     <Evaluation v-else-if="currentPage === 'evaluation'" @navigate="navigate" />
     <TeacherInsights v-else-if="currentPage === 'teacherInsights'" />

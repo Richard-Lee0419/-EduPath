@@ -24,6 +24,7 @@ const functionPages: PageKey[] = [
   'knowledgeBase',
   'evaluation',
   'tutor',
+  'personalPdf',
   'quiz',
   'teacherInsights',
   'taskCenter',

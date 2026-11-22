@@ -1,8 +1,8 @@
-import { apiPost } from './http';
+import { apiGet, apiPost } from './http';
 import type { LoginPayload, RegisterPayload, ReviewRole, User } from '../types';
 import type { LoginResult } from '@/types/api';
 import { authStorage, clearReviewContext, clearStoredSession, EXPIRES_KEY, REFRESH_KEY,
-  reviewCode, TOKEN_KEY, USER_KEY } from './session';
+  reviewCodeForEntry, setOneClickReview, TOKEN_KEY, USER_KEY } from './session';
 
 type BackendUser = LoginResult['user'];
 
@@ -67,11 +67,20 @@ export const register = async (payload: RegisterPayload): Promise<User> => {
   return persistSession(session);
 };
 
+export const getReviewAvailability = () =>
+  apiGet<{ enabled: boolean }>('/auth/review/one-click', undefined, { anonymous: true });
+
 export const enterReview = async (role: ReviewRole): Promise<User> => {
-  const code = reviewCode();
-  if (!code) throw new Error('请打开评委专属链接');
-  const session = await apiPost<LoginResult>('/auth/review', { code, role }, { anonymous: true });
-  return persistSession(session);
+  const code = reviewCodeForEntry();
+  if (code) {
+    const session = await apiPost<LoginResult>('/auth/review', { code, role }, { anonymous: true });
+    return persistSession(session);
+  }
+  const result = await apiPost<{ code: string; expires_at: string; session: LoginResult }>(
+    '/auth/review/one-click', { role }, { anonymous: true },
+  );
+  setOneClickReview(result.code, result.expires_at);
+  return persistSession(result.session);
 };
 
 export const verifyCurrentUser = async (): Promise<User> => {

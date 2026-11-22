@@ -24,6 +24,8 @@ public class AccountAccessService {
     private final PasswordService passwords;
     private final ClassRepository classes;
     private final boolean reviewEnabled;
+    private final boolean oneClickEnabled;
+    private final int oneClickDailyLimit;
     private final SecureRandom random = new SecureRandom();
 
     public AccountAccessService(
@@ -31,12 +33,16 @@ public class AccountAccessService {
             UserRepository users,
             PasswordService passwords,
             ClassRepository classes,
-            @Value("${edupath.review-access.enabled:false}") boolean reviewEnabled) {
+            @Value("${edupath.review-access.enabled:false}") boolean reviewEnabled,
+            @Value("${edupath.review-access.one-click-enabled:false}") boolean oneClickEnabled,
+            @Value("${edupath.review-access.one-click-daily-limit:50}") int oneClickDailyLimit) {
         this.jdbc = jdbc;
         this.users = users;
         this.passwords = passwords;
         this.classes = classes;
         this.reviewEnabled = reviewEnabled;
+        this.oneClickEnabled = oneClickEnabled;
+        this.oneClickDailyLimit = oneClickDailyLimit;
     }
 
     public IssuedInvite issueTeacherInvite(long adminId, String email, int hours) {
@@ -69,6 +75,33 @@ public class AccountAccessService {
     @Transactional
     public IssuedReviewLink issueReviewLink(long adminId, int hours) {
         requireReviewEnabled();
+        return createReviewLink(adminId, hours);
+    }
+
+    public boolean oneClickAvailable() {
+        return reviewEnabled && oneClickEnabled && oneClickDailyLimit > 0;
+    }
+
+    @Transactional
+    public IssuedReviewLink issueOneClickReview(String role) {
+        if (!oneClickAvailable()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "一键评委体验未开放");
+        }
+        requireReviewRole(role);
+        // The single row serializes new sessions across app instances. Roll back the quota if provisioning fails.
+        int reserved = jdbc.update("""
+                UPDATE review_session_quota
+                SET sessions_started = CASE WHEN session_day = CURRENT_DATE THEN sessions_started + 1 ELSE 1 END,
+                    session_day = CURRENT_DATE
+                WHERE id = 1 AND (session_day <> CURRENT_DATE OR sessions_started < ?)
+                """, oneClickDailyLimit);
+        if (reserved == 0) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "今天的评委体验名额已用完，请联系参赛团队");
+        }
+        return createReviewLink(null, 4);
+    }
+
+    private IssuedReviewLink createReviewLink(Long adminId, int hours) {
         Instant expiry = expiry(hours);
         String suffix = UUID.randomUUID().toString().replace("-", "");
         String className = "评委演示班 " + suffix.substring(0, 6).toUpperCase(Locale.ROOT);
@@ -88,7 +121,7 @@ public class AccountAccessService {
             statement.setLong(2, teacherId);
             statement.setLong(3, studentId);
             statement.setLong(4, classId);
-            statement.setLong(5, adminId);
+            statement.setObject(5, adminId, java.sql.Types.BIGINT);
             statement.setTimestamp(6, Timestamp.from(expiry));
             return statement;
         }, key);
@@ -116,9 +149,7 @@ public class AccountAccessService {
 
     public ReviewLogin authenticateReviewer(String code, String role) {
         requireReviewEnabled();
-        if (!"teacher".equals(role) && !"student".equals(role)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择教师或学生体验");
-        }
+        requireReviewRole(role);
         if (!code.matches("rv_[A-Za-z0-9_-]{43}")) {
             throw invalidReview();
         }
@@ -134,6 +165,12 @@ public class AccountAccessService {
                 .filter(candidate -> "active".equals(candidate.status()) && role.equals(candidate.role()))
                 .orElseThrow(this::invalidReview);
         return new ReviewLogin(user, account.expiresAt());
+    }
+
+    private void requireReviewRole(String role) {
+        if (!"teacher".equals(role) && !"student".equals(role)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择教师或学生体验");
+        }
     }
 
     public boolean isReviewUser(long userId) {
