@@ -474,6 +474,7 @@ test('review link opens both roles in the same course and keeps the administrato
     expect(await reviewer.evaluate(() => JSON.parse(localStorage.getItem('edupath_user')!).role)).toBe('admin');
 
     const manager = reviewer.getByRole('region', { name: '班级课程管理' });
+    await manager.getByLabel('管理课程').selectOption('0');
     const name = `评委体验 · 光谱校准 ${randomUUID().slice(0, 6)}`;
     await manager.getByLabel('课程名称').fill(name);
     await manager.getByLabel('知识点（每行一项）').fill('Spectral calibration\nReference lamp');
@@ -510,8 +511,9 @@ test('review link opens both roles in the same course and keeps the administrato
 });
 
 test('ordinary login offers both review roles when the demo environment allows one click', async ({ page, request }) => {
+  const prefix = (process.env.VITE_APP_BASE || '/').replace(/\/$/, '');
   const availability = await responseData(await request.get(`${backend}/api/auth/review/one-click`));
-  await page.goto('/login');
+  await page.goto(`${prefix}/login`);
   const review = page.getByRole('region', { name: '评委体验' });
   const teacher = review.getByRole('button', { name: /进入教师工作台/ });
   if (!availability.enabled) {
@@ -521,15 +523,41 @@ test('ordinary login offers both review roles when the demo environment allows o
     return;
   }
 
+  // A reviewer can start on the student side without anyone preparing the class from the workbench.
+  await review.getByRole('button', { name: /进入学生端/ }).click();
+  await expect(page).toHaveURL(/\/learning-home$/);
+  expect(new URL(page.url()).pathname).toBe(`${prefix}/learning-home`);
+  await expect(page.getByRole('region', { name: '学生体验任务' })).toBeVisible();
+  await expect(page.getByRole('region', { name: '我的班级课程' })).toHaveCount(0);
+  await page.getByRole('button', { name: '用示例 PDF 提问' }).click();
+  await expect(page).toHaveURL(/\/personal-pdf$/);
+  await page.getByRole('button', { name: '导入示例 PDF 并填入问题' }).click();
+  await expect(page.getByLabel('想弄懂哪一部分？')).toHaveValue(/组索引为什么是 6 位/);
+  await page.getByRole('button', { name: '按这份 PDF 提问' }).click();
+  await expect(page.getByRole('button', { name: '查看 PDF 第 2 页' })).toBeVisible();
+
+  await page.getByRole('button', { name: '切换体验身份' }).click();
   await teacher.click();
   await expect(page).toHaveURL(/\/teacher-insights$/);
-  await expect(page.getByRole('region', { name: '班级课程管理' })).toBeVisible();
+  const manager = page.getByRole('region', { name: '班级课程管理' });
+  await expect(manager.getByLabel('课程名称')).toHaveValue('Cache 地址拆分 · 演示课');
+  await expect(manager.getByText(/班级学生：示例学生 A.*示例学生 B/)).toBeVisible();
+  await manager.getByLabel('选择示例学生').selectOption({ label: '示例学生 C' });
+  await manager.getByRole('button', { name: '添加学生' }).click();
+  await expect(manager.getByText(/班级学生：.*示例学生 C/)).toBeVisible();
+  await manager.getByRole('button', { name: '导入示例 PDF 并发布' }).click();
+  await expect(manager.getByText('课程已向选中的班级发布。')).toBeVisible();
   await page.getByRole('button', { name: '切换体验身份' }).click();
   const response = page.waitForResponse(response => response.url().endsWith('/api/auth/review') &&
     response.request().method() === 'POST');
   await review.getByRole('button', { name: /进入学生端/ }).click();
   expect((await response).ok()).toBeTruthy();
   await expect(page).toHaveURL(/\/learning-home$/);
+  const classCourse = page.getByRole('region', { name: '我的班级课程' }).getByRole('article');
+  await expect(classCourse).toContainText('Cache 地址拆分 · 演示课');
+  await classCourse.getByRole('link', { name: '进入课程' }).click();
+  expect(new URL(page.url()).pathname).toBe(`${prefix}/knowledge-base`);
+  await expect(page.locator('.document-row').filter({ hasText: 'Cache 地址拆分 · 示例讲义.pdf' })).toBeVisible();
   await page.getByRole('navigation', { name: '学习功能导航' }).getByRole('button', { name: '个人 PDF' }).click();
   await expect(page).toHaveURL(/\/personal-pdf$/);
   await expect(page.getByLabel('上传课程 PDF')).toBeVisible();

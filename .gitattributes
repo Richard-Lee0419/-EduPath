@@ -1,1 +1,2 @@
 *.sh text eol=lf
+frontend/src/assets/cache-review-sample.pdf binary

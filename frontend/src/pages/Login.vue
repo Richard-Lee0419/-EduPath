@@ -170,7 +170,7 @@ const submit = async () => {
           <div>
             <h2>评委体验</h2>
             <p>{{ hasReviewLink || oneClickReview
-              ? '在同一演示班级体验教师发布课程和学生学习。'
+              ? '直接选择身份，体验示例班级、课程和 PDF 辅导。'
               : '请使用参赛材料中的评委专属链接。' }}</p>
           </div>
         </div>

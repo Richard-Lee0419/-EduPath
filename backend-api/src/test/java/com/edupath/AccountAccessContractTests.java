@@ -75,11 +75,25 @@ class AccountAccessContractTests {
         long classId = data(mvc.perform(get("/api/classes").header("Authorization", bearer(teacherToken))))
                 .get(0).path("id").asLong();
         mvc.perform(get("/api/classes/{id}/members", classId).header("Authorization", bearer(teacherToken)))
+                .andExpect(jsonPath("$.data.length()").value(2))
                 .andExpect(jsonPath("$.data[0].user_id").value(student.path("user").path("id").asInt()));
+        JsonNode roster = data(mvc.perform(get("/api/classes/review-students").header("Authorization", bearer(teacherToken))));
+        assertThat(roster.size()).isEqualTo(3);
+        mvc.perform(get("/api/classes/{id}/insights", classId).header("Authorization", bearer(teacherToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.summary.active_students").value(2))
+                .andExpect(jsonPath("$.data.summary.average_mastery").value(70.0));
+        request("/api/classes/" + classId + "/members", Map.of("user_id", roster.get(2).path("user_id").asLong()), teacherToken)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(3));
 
         JsonNode another = data(request(path, Map.of("role", "teacher"), null));
         String otherToken = another.path("session").path("token").asText();
+        long otherClass = data(mvc.perform(get("/api/classes").header("Authorization", bearer(otherToken))))
+                .get(0).path("id").asLong();
         mvc.perform(get("/api/classes/{id}/members", classId).header("Authorization", bearer(otherToken)))
+                .andExpect(status().isForbidden());
+        request("/api/classes/" + otherClass + "/members", Map.of("user_id", roster.get(2).path("user_id").asLong()), otherToken)
                 .andExpect(status().isForbidden());
         request(path, Map.of("role", "student"), null).andExpect(status().isTooManyRequests());
     }
@@ -128,7 +142,7 @@ class AccountAccessContractTests {
 
         mvc.perform(get("/api/classes/{id}/members", classId).header("Authorization", bearer(teacherToken)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data.length()").value(2))
                 .andExpect(jsonPath("$.data[0].user_id").value(student.path("user").path("id").asInt()));
         mvc.perform(get("/api/classes/{id}/members", classId).header("Authorization", bearer(studentToken)))
                 .andExpect(status().isForbidden());

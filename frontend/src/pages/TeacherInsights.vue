@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import TeachingCourseManager from '@/components/TeachingCourseManager.vue';
-import { getClassLearningInsights, listTeachingClasses } from '@/api/classInsight';
+import { getClassLearningInsights, listTeachingClasses, listReviewStudents, type ReviewStudent } from '@/api/classInsight';
 import { createTeacherAssignment, getTeacherAssignmentProgress, listTeacherAssignments, publishTeacherAssignment } from '@/api/teacherAssignments';
 import type { ClassLearningInsights, TeachingClass } from '@/types/api';
 import type { AssignmentProgress, TeacherAssignment } from '@/types/api';
 
+const props = defineProps<{ reviewDemo?: boolean }>();
+const reviewStudents = ref<ReviewStudent[]>([]);
+const studentName = (username: string) =>
+  reviewStudents.value.find((student) => student.username === username)?.display_name ?? username;
 const classes = ref<TeachingClass[]>([]);
 const selectedClassId = ref<number | null>(null);
 const selectedCourseId = ref<number | null>(null);
@@ -116,7 +120,10 @@ const loadClasses = async () => {
   loading.value = true;
   errorMessage.value = '';
   try {
-    classes.value = await listTeachingClasses();
+    [classes.value, reviewStudents.value] = await Promise.all([
+      listTeachingClasses(),
+      props.reviewDemo ? listReviewStudents() : Promise.resolve([]),
+    ]);
     if (!classes.value.some((item) => item.id === selectedClassId.value)) {
       selectedClassId.value = classes.value[0]?.id ?? null;
     }
@@ -146,7 +153,8 @@ onMounted(() => void loadClasses());
       <div>
         <span>TEACHING INTELLIGENCE</span>
         <h1>班级学习洞察</h1>
-        <p>聚合真实学习事件、掌握度、测验和资源完成记录，帮助教师识别共性薄弱点与需要优先跟进的学生。</p>
+        <p v-if="reviewDemo">班级已放入示例学生和学习记录。可以添加新成员、发布讲义，也能查看薄弱点和学生跟进建议。</p>
+        <p v-else>聚合真实学习事件、掌握度、测验和资源完成记录，帮助教师识别共性薄弱点与需要优先跟进的学生。</p>
       </div>
       <div class="insight-filters">
         <label>
@@ -172,7 +180,7 @@ onMounted(() => void loadClasses());
       </div>
     </header>
 
-    <TeachingCourseManager @class-updated="loadClasses" />
+    <TeachingCourseManager :review-demo="reviewDemo" :review-students="reviewStudents" @class-updated="loadClasses" />
 
     <p v-if="loading && !insights" class="insight-state">正在聚合班级真实学习证据…</p>
     <p v-else-if="errorMessage" class="insight-state is-error">{{ errorMessage }}</p>
@@ -234,12 +242,12 @@ onMounted(() => void loadClasses());
           <header><div><span>STUDENT SIGNALS</span><h2>学生风险分层</h2></div><b>确定性阈值</b></header>
           <div v-if="insights.student_risks.length" class="student-table">
             <article v-for="item in insights.student_risks" :key="item.user_id">
-              <div class="student-name"><strong>{{ item.username }}</strong><small>最近活动 {{ formatTime(item.last_active_at) }}</small></div>
+              <div class="student-name"><strong>{{ studentName(item.username) }}</strong><small>最近活动 {{ formatTime(item.last_active_at) }}</small></div>
               <span :class="`risk-${item.risk_level}`">{{ riskLabels[item.risk_level] }}</span>
               <div><b>{{ score(item.average_mastery) }}</b><small>掌握度</small></div>
               <div><b>{{ item.activity_count }}</b><small>学习事件</small></div>
               <p>{{ item.reasons.join('；') }}</p>
-              <button type="button" class="insight-action" @click="prepareAssignment(`${item.username}个性化跟进`, `请先完成${item.reasons[0] || '薄弱知识点'}对应练习，再查看学习反馈。`)">预填跟进</button>
+              <button type="button" class="insight-action" @click="prepareAssignment(`${studentName(item.username)}个性化跟进`, `请先完成${item.reasons[0] || '薄弱知识点'}对应练习，再查看学习反馈。`)">预填跟进</button>
             </article>
           </div>
           <p v-else class="card-empty">班级尚未添加学生成员。</p>

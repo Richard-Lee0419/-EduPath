@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { appPath } from '@/appPath';
 import { computed, onMounted, ref } from 'vue';
 import { getCourses, getKnowledgePoints, learningCourses, requestedCourseId } from '../api/course';
 import { listKnowledgeDocuments, searchKnowledgeBase, uploadKnowledgeDocument } from '../api/kb';
@@ -219,7 +220,7 @@ onMounted(async () => {
         <SplitText tag="h1" text="课程知识库" />
         <p>AI 回答与资源生成均基于课程知识库。</p>
       </div>
-      <a v-if="canManageKnowledgeBase && classCourse" class="primary-upload hover-scale" href="/teacher-insights">管理班级课程资料</a>
+      <a v-if="canManageKnowledgeBase && classCourse" class="primary-upload hover-scale" :href="appPath('/teacher-insights')">管理班级课程资料</a>
       <button v-else-if="canManageKnowledgeBase" class="primary-upload hover-scale" type="button" :disabled="uploading" @click="triggerUpload">
         {{ uploading ? '上传中' : '上传课程资料' }}
       </button>

@@ -6,8 +6,10 @@ COPY package*.json ./
 RUN npm ci --registry="${NPM_CONFIG_REGISTRY}"
 
 COPY . .
-ARG VITE_API_BASE_URL=/api
+ARG VITE_API_BASE_URL=
+ARG VITE_APP_BASE=/
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+ENV VITE_APP_BASE=${VITE_APP_BASE}
 RUN npm run test:real-api && npm run build
 
 FROM nginx:1.27-alpine

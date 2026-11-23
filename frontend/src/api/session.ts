@@ -1,9 +1,12 @@
-export const USER_KEY = 'edupath_user';
-export const TOKEN_KEY = 'edupath_token';
-export const REFRESH_KEY = 'edupath_refresh_token';
-export const EXPIRES_KEY = 'edupath_token_expires_at';
-const REVIEW_CODE_KEY = 'edupath_review_code';
-const ONE_CLICK_EXPIRY_KEY = 'edupath_review_one_click_expiry';
+import { appPath } from '../appPath';
+
+const storageKey = (key: string) => appPath('/') === '/' ? key : appPath('/') + key;
+export const USER_KEY = storageKey('edupath_user');
+export const TOKEN_KEY = storageKey('edupath_token');
+export const REFRESH_KEY = storageKey('edupath_refresh_token');
+export const EXPIRES_KEY = storageKey('edupath_token_expires_at');
+const REVIEW_CODE_KEY = storageKey('edupath_review_code');
+const ONE_CLICK_EXPIRY_KEY = storageKey('edupath_review_one_click_expiry');
 
 export const reviewCode = () => sessionStorage.getItem(REVIEW_CODE_KEY);
 
@@ -32,7 +35,7 @@ export const clearReviewContext = () => {
 };
 
 export const captureReviewLink = (): boolean => {
-  if (location.pathname !== '/login') return false;
+  if (location.pathname !== appPath('/login')) return false;
   const fragment = new URLSearchParams(location.hash.slice(1));
   if (!fragment.has('review')) return false;
 

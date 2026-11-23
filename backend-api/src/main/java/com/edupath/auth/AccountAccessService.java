@@ -1,6 +1,7 @@
 package com.edupath.auth;
 
 import com.edupath.course.ClassRepository;
+import com.edupath.course.ReviewDemoScenarioService;
 import java.security.SecureRandom;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -23,6 +24,7 @@ public class AccountAccessService {
     private final UserRepository users;
     private final PasswordService passwords;
     private final ClassRepository classes;
+    private final ReviewDemoScenarioService reviewDemo;
     private final boolean reviewEnabled;
     private final boolean oneClickEnabled;
     private final int oneClickDailyLimit;
@@ -33,6 +35,7 @@ public class AccountAccessService {
             UserRepository users,
             PasswordService passwords,
             ClassRepository classes,
+            ReviewDemoScenarioService reviewDemo,
             @Value("${edupath.review-access.enabled:false}") boolean reviewEnabled,
             @Value("${edupath.review-access.one-click-enabled:false}") boolean oneClickEnabled,
             @Value("${edupath.review-access.one-click-daily-limit:50}") int oneClickDailyLimit) {
@@ -40,6 +43,7 @@ public class AccountAccessService {
         this.users = users;
         this.passwords = passwords;
         this.classes = classes;
+        this.reviewDemo = reviewDemo;
         this.reviewEnabled = reviewEnabled;
         this.oneClickEnabled = oneClickEnabled;
         this.oneClickDailyLimit = oneClickDailyLimit;
@@ -125,7 +129,9 @@ public class AccountAccessService {
             statement.setTimestamp(6, Timestamp.from(expiry));
             return statement;
         }, key);
-        return new IssuedReviewLink(key.getKey().longValue(), classId, className, code, expiry);
+        long linkId = key.getKey().longValue();
+        reviewDemo.prepare(linkId, teacherId, classId, users.findById(studentId).orElseThrow());
+        return new IssuedReviewLink(linkId, classId, className, code, expiry);
     }
 
     public ReviewLinks listReviewLinks() {
@@ -154,16 +160,19 @@ public class AccountAccessService {
             throw invalidReview();
         }
         ReviewAccount account = jdbc.query("""
-                SELECT teacher_user_id, student_user_id, expires_at
+                SELECT id, class_id, teacher_user_id, student_user_id, expires_at
                 FROM review_links
                 WHERE code_hash = ? AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP
-                """, (rs, row) -> new ReviewAccount(rs.getLong("teacher_user_id"), rs.getLong("student_user_id"),
+                """, (rs, row) -> new ReviewAccount(rs.getLong("id"), rs.getLong("class_id"),
+                rs.getLong("teacher_user_id"), rs.getLong("student_user_id"),
                 rs.getTimestamp("expires_at").toInstant()), TokenRepository.hash(code))
                 .stream().findFirst().orElseThrow(this::invalidReview);
         long userId = "teacher".equals(role) ? account.teacherId() : account.studentId();
         var user = users.findById(userId)
                 .filter(candidate -> "active".equals(candidate.status()) && role.equals(candidate.role()))
                 .orElseThrow(this::invalidReview);
+        var student = "student".equals(role) ? user : users.findById(account.studentId()).orElseThrow(this::invalidReview);
+        reviewDemo.prepare(account.linkId(), account.teacherId(), account.classId(), student);
         return new ReviewLogin(user, account.expiresAt());
     }
 
@@ -179,15 +188,6 @@ public class AccountAccessService {
 
     public boolean isReviewSessionActive(long userId) {
         return reviewEnabled && hasReviewLink(userId, true);
-    }
-
-    public boolean isPairedReviewMember(long teacherId, long classId, long studentId) {
-        Long count = jdbc.queryForObject("""
-                SELECT COUNT(*) FROM review_links
-                WHERE teacher_user_id = ? AND class_id = ? AND student_user_id = ?
-                  AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP
-                """, Long.class, teacherId, classId, studentId);
-        return count != null && count > 0;
     }
 
     private boolean hasReviewLink(long userId, boolean activeOnly) {
@@ -227,5 +227,5 @@ public class AccountAccessService {
     public record ReviewLink(long id, long classId, String className, Instant expiresAt, boolean active) {}
     public record ReviewLinks(boolean enabled, List<ReviewLink> links) {}
     public record ReviewLogin(UserRepository.UserRecord user, Instant expiresAt) {}
-    private record ReviewAccount(long teacherId, long studentId, Instant expiresAt) {}
+    private record ReviewAccount(long linkId, long classId, long teacherId, long studentId, Instant expiresAt) {}
 }

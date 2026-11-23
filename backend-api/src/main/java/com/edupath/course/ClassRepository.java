@@ -90,7 +90,12 @@ public class ClassRepository {
 
     public List<Long> activeStudentUserIds() {
         return jdbcTemplate.queryForList(
-                "SELECT id FROM users WHERE role = 'student' AND status = 'active' ORDER BY id ASC",
+                """
+                SELECT u.id FROM users u WHERE u.role = 'student' AND u.status = 'active'
+                  AND NOT EXISTS (SELECT 1 FROM review_links r WHERE r.student_user_id = u.id)
+                  AND NOT EXISTS (SELECT 1 FROM review_demo_students s WHERE s.user_id = u.id)
+                ORDER BY u.id ASC
+                """,
                 Long.class);
     }
 

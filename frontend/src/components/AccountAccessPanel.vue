@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { appPath } from '@/appPath';
 import { computed, onMounted, ref } from 'vue';
 import { getReviewLinks, issueReviewLink, issueTeacherInvite, revokeReviewLink } from '../api/accountAccess';
 import type { IssuedReviewLink, ReviewLinks, TeacherInvite } from '../api/accountAccess';
@@ -15,7 +16,7 @@ const busy = ref(false);
 const timeFormat = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' });
 
 const linkUrl = computed(() => issuedLink.value
-  ? new URL('/login#review=' + issuedLink.value.code, location.origin).href
+  ? new URL(appPath('/login#review=' + issuedLink.value.code), location.origin).href
   : '');
 
 const formatExpiry = (value: string) => timeFormat.format(new Date(value));

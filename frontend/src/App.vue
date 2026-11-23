@@ -3,6 +3,7 @@ import { defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref } from 
 import type { Component } from 'vue';
 import { getStoredUser, logout } from './api/auth';
 import { captureReviewLink, reviewCodeForEntry } from './api/session';
+import { appPath, localPath } from './appPath';
 import AppShell from './components/AppShell.vue';
 import AsyncPageLoading from './components/AsyncPageLoading.vue';
 import Dashboard from './pages/Dashboard.vue';
@@ -81,7 +82,7 @@ const pathToPage = new Map<string, PageKey>([
   ['/user-center', 'userCenter'],
 ]);
 
-const pageFromPath = (path: string): PageKey => pathToPage.get(path) ?? 'dashboard';
+const pageFromPath = (path: string): PageKey => pathToPage.get(localPath(path)) ?? 'dashboard';
 const isPublicPage = (page: PageKey) => page === 'welcome' || page === 'login' || page === 'register';
 const isAuthPage = (page: PageKey) => page === 'login' || page === 'register';
 const canAccessPage = (page: PageKey) => {
@@ -90,7 +91,7 @@ const canAccessPage = (page: PageKey) => {
   return true;
 };
 
-const routeFromPage = (page: PageKey) => pageRoutes[page];
+const routeFromPage = (page: PageKey) => appPath(pageRoutes[page]);
 
 const scrollToPageTop = () => {
   void nextTick(() => {
@@ -279,7 +280,7 @@ onBeforeUnmount(() => {
       @logout="handleLogout"
       @profile-intent="handleProfileIntent"
     />
-    <LearningHome v-else-if="currentPage === 'learningHome'" @navigate="navigate" />
+    <LearningHome v-else-if="currentPage === 'learningHome'" :review-demo="user?.review === true" @navigate="navigate" />
     <ProfileChat
       v-else-if="currentPage === 'profile'"
       :initial-intent="initialProfileIntent"
@@ -291,10 +292,10 @@ onBeforeUnmount(() => {
     <LearningPath v-else-if="currentPage === 'learningPath'" @navigate="navigate" />
     <KnowledgeBase v-else-if="currentPage === 'knowledgeBase'" :user="user" />
     <Tutor v-else-if="currentPage === 'tutor'" :show-personal-pdf="user?.role === 'student'" @navigate="navigate" />
-    <PersonalPdfTutor v-else-if="currentPage === 'personalPdf'" class="personal-pdf-page" />
+    <PersonalPdfTutor v-else-if="currentPage === 'personalPdf'" :review-demo="user?.review === true" class="personal-pdf-page" />
     <Quiz v-else-if="currentPage === 'quiz'" />
     <Evaluation v-else-if="currentPage === 'evaluation'" @navigate="navigate" />
-    <TeacherInsights v-else-if="currentPage === 'teacherInsights'" />
+    <TeacherInsights v-else-if="currentPage === 'teacherInsights'" :review-demo="user?.review === true" />
     <TaskCenter v-else-if="currentPage === 'taskCenter'" />
     <UserCenter v-else :user="user" @navigate="navigate" @logout="handleLogout" @exit="handleExit()" />
   </AppShell>

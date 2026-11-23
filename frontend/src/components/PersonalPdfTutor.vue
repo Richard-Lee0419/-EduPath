@@ -4,6 +4,9 @@ import {
   askPersonalPdf, deletePersonalPdf, getPersonalPdf, listPersonalPdfs, uploadPersonalPdf,
   type PersonalPdf, type PersonalPdfAnswer,
 } from '@/api/personalPdf';
+import { loadReviewSample, reviewSampleName, reviewSampleQuestion } from '@/api/reviewSample';
+
+defineProps<{ reviewDemo?: boolean }>();
 
 const documents = ref<PersonalPdf[]>([]);
 const selectedId = ref('');
@@ -45,16 +48,29 @@ function chooseFile(event: Event) {
   file.value = (event.target as HTMLInputElement).files?.[0] ?? null;
 }
 
-async function upload() {
+async function addPdf(pdf: File) {
+  if (pdf.size > 8 * 1024 * 1024) throw new Error('PDF 文件不能超过 8 MiB');
+  const document = await uploadPersonalPdf(pdf);
+  documents.value = [document, ...documents.value.filter((item) => item.id !== document.id)];
+  selectedId.value = document.id;
+}
+
+function upload() {
   const picked = file.value;
   if (!picked) return;
-  await run('upload', async () => {
-    if (picked.size > 8 * 1024 * 1024) throw new Error('PDF 文件不能超过 8 MiB');
-    const document = await uploadPersonalPdf(picked);
-    documents.value = [document, ...documents.value];
-    selectedId.value = document.id;
+  return run('upload', async () => {
+    await addPdf(picked);
     file.value = null;
     if (input.value) input.value.value = '';
+  });
+}
+
+function openSample() {
+  return run('sample', async () => {
+    const existing = documents.value.find((document) => document.filename === reviewSampleName);
+    if (existing) selectedId.value = existing.id;
+    else await addPdf(await loadReviewSample());
+    question.value = reviewSampleQuestion;
   });
 }
 
@@ -108,6 +124,11 @@ onUnmounted(() => {
   <main class="personal-pdf interactive-card" aria-labelledby="personal-pdf-title">
     <h1 id="personal-pdf-title">个人 PDF 辅导</h1>
     <p>上传你的课程讲义，选择一份资料后提问。资料仅对你的账号可见。</p>
+    <div v-if="reviewDemo" class="pdf-actions">
+      <button type="button" :disabled="Boolean(busy)" @click="openSample">
+        {{ busy === 'sample' ? '正在准备示例讲义…' : '导入示例 PDF 并填入问题' }}
+      </button>
+    </div>
 
     <form class="pdf-form" @submit.prevent="upload">
       <label for="personal-pdf-file">上传课程 PDF</label>

@@ -1,7 +1,8 @@
 import type { ApiResponse } from '@/types/api';
+import { appPath } from '../appPath';
 import { accessToken } from './session';
 
-export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || appPath('/api');
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {

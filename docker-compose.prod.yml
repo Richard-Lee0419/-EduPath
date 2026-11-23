@@ -3,7 +3,7 @@ services:
     build:
       context: ./frontend
       args:
-        VITE_API_BASE_URL: /api
+        VITE_APP_BASE: ${VITE_APP_BASE:-/}
         NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org/}
     image: edupath/frontend:${EDUPATH_IMAGE_TAG:-latest}
     restart: unless-stopped

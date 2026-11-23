@@ -6,6 +6,9 @@ export function listTeachingClasses() {
 }
 
 export type ClassMember = { user_id: number; username: string; class_role: string };
+export type ReviewStudent = { user_id: number; username: string; display_name: string };
+
+export const listReviewStudents = () => apiGet<ReviewStudent[]>('/classes/review-students');
 
 export const createTeachingClass = (name: string) => apiPost<{ class_info: TeachingClass }>('/classes', { name });
 

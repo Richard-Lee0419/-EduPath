@@ -190,7 +190,11 @@ SSE 连接也支持 `access_token` 查询参数，用于浏览器 `EventSource` 
 
 ### GET / POST `/api/auth/review/one-click`
 
-演示站的 `GET /api/auth/review/one-click` 返回 `{ "enabled": true }` 时，登录页显示免注册的师生体验入口。首次点击调用同路径的 POST，传入 `{ "role": "teacher" }` 或 `{ "role": "student" }`，返回 `code`、`expires_at` 和上面的登录结构 `session`。此会话创建一对独立师生账号和一个演示班，有效期为 4 小时。同一浏览器标签页切换身份时，使用同一个 `code` 调用 `POST /api/auth/review`，保留已发布的班级课程。功能关闭时 POST 返回 404，每日的新建名额用完时返回 429。
+演示站的 `GET /api/auth/review/one-click` 返回 `{ "enabled": true }` 时，登录页显示免注册的师生体验入口。首次点击调用同路径的 POST，传入 `{ "role": "teacher" }` 或 `{ "role": "student" }`，返回 `code`、`expires_at` 和上面的登录结构 `session`。会话有效期为 4 小时，预置独立班级、两名已入班的示例学生、一名候补学生、示例课程草稿和学习记录。同一浏览器标签页切换身份时，使用同一个 `code` 调用 `POST /api/auth/review`，保留已发布的班级课程。示例课程遵循常规发布规则，需先通过 PDF 索引。功能关闭时 POST 返回 404，每日的新建名额用完时返回 429。
+
+### GET `/api/classes/review-students`
+
+仅评委教师会话可调用。返回当前会话的示例学生列表，每项包含 `user_id`、`username` 和 `display_name`。评委教师可通过 `POST /api/classes/{class_id}/members` 将其中的学生加入自己管理的班级。正式教师添加学生仍使用原接口。
 
 ### 教师邀请码与评委链接管理
 

@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import CoursePdfPreview from './CoursePdfPreview.vue';
+import { appPath } from '@/appPath';
+import { loadReviewSample, reviewSampleName } from '@/api/reviewSample';
 import {
   addTeachingClassStudent, createTeachingClass, listTeachingClasses, listTeachingClassMembers, type ClassMember,
+  type ReviewStudent,
 } from '@/api/classInsight';
 import {
   deleteKnowledgeDocument, listKnowledgeDocuments, reindexKnowledgeDocument, uploadKnowledgeDocument,
@@ -14,12 +17,17 @@ import {
 } from '@/api/teachingCourse';
 import type { TeachingClass } from '@/types/api';
 
+const props = defineProps<{ reviewDemo?: boolean; reviewStudents?: ReviewStudent[] }>();
 const courses = ref<TeachingCourse[]>([]);
 const classes = ref<TeachingClass[]>([]);
 const newClassName = ref('');
 const memberClassId = ref(0);
 const studentUsername = ref('');
 const members = ref<ClassMember[]>([]);
+const memberName = (username: string) =>
+  props.reviewStudents?.find((student) => student.username === username)?.display_name ?? username;
+const availableStudents = computed(() =>
+  props.reviewStudents?.filter((student) => !members.value.some((member) => member.user_id === student.user_id)) ?? []);
 const documents = ref<KnowledgeDocument[]>([]);
 const selectedId = ref(0);
 const name = ref('');
@@ -37,6 +45,7 @@ const fileMessages = ref<Array<{ filename: string; detail: string; passed: boole
 const statusLabels = { draft: '草稿', active: '已发布', archived: '已撤回' };
 const indexLabels: Record<string, string> = { indexed: '可学习', failed: '解析或索引失败', pending: '待索引' };
 const hasIndexedPdf = computed(() => documents.value.some((document) => document.index_status === 'indexed'));
+const isSampleCourse = computed(() => props.reviewDemo && selected.value?.code.startsWith('REVIEW-'));
 const emit = defineEmits<{ classUpdated: [] }>();
 
 async function operate(work: () => Promise<void>) {
@@ -99,14 +108,39 @@ function save() {
   });
 }
 
+async function setPublication(courseId: number, published: boolean) {
+  const course = await setTeachingCoursePublication(courseId, classIds.value, published);
+  upsert(course);
+  classIds.value = [...course.class_ids];
+  message.value = published ? '课程已向选中的班级发布。' : '课程已撤回，班内学生暂时无法访问。';
+  emit('classUpdated');
+}
+
 function publish(published: boolean) {
+  const course = selected.value;
+  if (course) return operate(() => setPublication(course.id, published));
+}
+
+function publishSample() {
+  const course = selected.value;
+  if (!isSampleCourse.value || !course || !classIds.value.length) return;
   return operate(async () => {
-    if (!selected.value) return;
-    const course = await setTeachingCoursePublication(selected.value.id, classIds.value, published);
-    upsert(course);
-    classIds.value = [...course.class_ids];
-    message.value = published ? '课程已向选中的班级发布。' : '课程已撤回，班内学生暂时无法访问。';
-    emit('classUpdated');
+    const sample = documents.value.find((document) => document.filename === reviewSampleName);
+    if (sample?.index_status !== 'indexed') {
+      if (sample) {
+        const created = await reindexKnowledgeDocument(sample.id);
+        try {
+          await waitForAgentTask(normalizeTaskId(created));
+        } finally {
+          await loadDocuments(course.id);
+        }
+      } else {
+        const result = await uploadKnowledgeDocument(course.id, await loadReviewSample());
+        await loadDocuments(course.id);
+        if (result.index_status !== 'indexed') throw new Error(result.index_error || '示例 PDF 未完成索引');
+      }
+    }
+    await setPublication(course.id, true);
   });
 }
 
@@ -118,6 +152,7 @@ function createClass() {
     classes.value = await listTeachingClasses();
     memberClassId.value = result.class_info.id;
     members.value = [];
+    studentUsername.value = '';
     newClassName.value = '';
     message.value = `班级「${result.class_info.name}」已创建。`;
     emit('classUpdated');
@@ -126,6 +161,7 @@ function createClass() {
 
 function chooseMemberClass() {
   members.value = [];
+  studentUsername.value = '';
   if (!memberClassId.value) return;
   return operate(async () => { members.value = await listTeachingClassMembers(memberClassId.value); });
 }
@@ -136,7 +172,7 @@ function addStudent() {
     if (!memberClassId.value || !username) throw new Error('请先选择班级并输入学生用户名');
     members.value = await addTeachingClassStudent(memberClassId.value, username);
     studentUsername.value = '';
-    message.value = `学生「${username}」已加入班级。`;
+    message.value = `学生「${memberName(username)}」已加入班级。`;
     emit('classUpdated');
   });
 }
@@ -189,8 +225,12 @@ function remove(document: KnowledgeDocument) {
 
 onMounted(() => operate(async () => {
   [courses.value, classes.value] = await Promise.all([listTeachingCourses(), listTeachingClasses()]);
-  const course = courses.value[0];
+  const course = (props.reviewDemo && courses.value.find((item) => item.code.startsWith('REVIEW-'))) || courses.value[0];
   editCourse(course);
+  if (props.reviewDemo) {
+    memberClassId.value = course?.class_ids[0] ?? classes.value[0]?.id ?? 0;
+    if (memberClassId.value) members.value = await listTeachingClassMembers(memberClassId.value);
+  }
   if (course) await loadDocuments(course.id);
 }));
 </script>
@@ -209,7 +249,15 @@ onMounted(() => operate(async () => {
     </header>
     <p v-if="error" class="is-error" role="alert">{{ error }}</p>
     <p v-if="message" role="status">{{ message }}</p>
-    <details class="course-panel classroom-controls">
+    <section v-if="isSampleCourse" class="course-panel review-course" aria-label="示例课程体验">
+      <h3>{{ selected?.name }}</h3>
+      <p v-if="selected?.status === 'active'">示例讲义已发布。点击页面顶部的「切换体验身份」，在学生端打开同一门课。</p>
+      <p v-else>已备好课程草稿和两页讲义。发布后切换到学生端，即可按讲义提问并查看原文页码。</p>
+      <button v-if="selected?.status !== 'active'" type="button" :disabled="busy || !classIds.length" @click="publishSample">
+        导入示例 PDF 并发布
+      </button>
+    </section>
+    <details class="course-panel classroom-controls" :open="reviewDemo">
       <summary>班级与成员</summary>
       <div class="course-management-grid">
         <form class="course-panel" @submit.prevent="createClass">
@@ -223,9 +271,15 @@ onMounted(() => operate(async () => {
               <option v-for="group in classes" :key="group.id" :value="group.id">{{ group.name }}</option>
             </select>
           </label>
-          <label class="course-field">学生用户名<input v-model="studentUsername" required maxlength="255" :disabled="busy" /></label>
-          <button type="submit" :disabled="busy || !memberClassId">添加学生</button>
-          <small v-if="memberClassId && members.length">班级学生：{{ members.filter((member) => member.class_role === 'student').map((member) => member.username).join('、') || '暂无' }}</small>
+          <label v-if="reviewDemo" class="course-field">选择示例学生
+            <select v-model="studentUsername" required :disabled="busy || !availableStudents.length">
+              <option value="" disabled>{{ availableStudents.length ? '请选择要添加的学生' : '示例学生已全部入班' }}</option>
+              <option v-for="student in availableStudents" :key="student.user_id" :value="student.username">{{ student.display_name }}</option>
+            </select>
+          </label>
+          <label v-else class="course-field">学生用户名<input v-model="studentUsername" required maxlength="255" :disabled="busy" /></label>
+          <button type="submit" :disabled="busy || !memberClassId || (reviewDemo && !studentUsername)">添加学生</button>
+          <small v-if="memberClassId && members.length">班级学生：{{ members.filter((member) => member.class_role === 'student').map((member) => memberName(member.username)).join('、') || '暂无' }}</small>
         </form>
       </div>
     </details>
@@ -285,7 +339,7 @@ onMounted(() => operate(async () => {
           {{ selected.status === 'active' ? '更新发布班级' : '发布课程' }}
         </button>
         <button v-if="selected.status === 'active'" type="button" :disabled="busy" @click="publish(false)">撤回课程</button>
-        <a v-if="selected.status === 'active'" :href="`/knowledge-base?course=${selected.id}`">打开课程知识库</a>
+        <a v-if="selected.status === 'active'" :href="appPath(`/knowledge-base?course=${selected.id}`)">打开课程知识库</a>
       </div>
     </section>
     <CoursePdfPreview ref="preview" />
@@ -300,6 +354,8 @@ onMounted(() => operate(async () => {
 .course-panel { display: grid; gap: 10px; align-content: start; padding: 14px; border: 1px solid #d8e9e2; border-radius: 12px; }
 .course-panel h3, .course-panel p { margin: 0; }
 .classroom-controls summary { cursor: pointer; }
+.review-course { margin-block: 14px; background: #eef7f3; }
+.review-course button:not(:disabled) { color: #fff; background: #105e53; border-color: #105e53; }
 .course-panel button { justify-self: start; }
 .course-field { display: grid; gap: 6px; }
 select, textarea, input:not([type='checkbox']) { max-width: 100%; padding: 8px; border: 1px solid #a8c8be; border-radius: 8px; font: inherit; }

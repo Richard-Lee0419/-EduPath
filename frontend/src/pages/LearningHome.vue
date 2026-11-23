@@ -8,6 +8,9 @@ import { listResources } from '../api/resource';
 import { waitForAgentTask } from '../api/task';
 import type { EvaluationReport, LearningPath, PageKey, Profile } from '../types';
 import type { Course } from '@/types/api';
+import { appPath } from '@/appPath';
+
+defineProps<{ reviewDemo?: boolean }>();
 
 const emit = defineEmits<{
   navigate: [page: PageKey];
@@ -242,13 +245,20 @@ onMounted(async () => {
       </aside>
     </section>
 
+    <section v-if="reviewDemo" class="learning-home__support-card interactive-card" aria-label="学生体验任务">
+      <h3>用示例讲义学习 Cache 地址拆分</h3>
+      <p v-if="classCourses.length">教师发布的资料已同步到下方。「个人 PDF」也可以导入样例讲义，体验带页码的问答。</p>
+      <p v-else>先用样例讲义试一次带页码的问答。也可以切换到教师端发布课程，返回后就在这里看到。</p>
+      <button type="button" @click="openPage('personalPdf')">用示例 PDF 提问</button>
+    </section>
+
     <section v-if="classCourses.length" aria-label="我的班级课程">
       <h2>我的班级课程</h2>
       <div class="learning-home__support-grid">
         <article v-for="course in classCourses" :key="course.id" class="learning-home__support-card interactive-card">
           <h3>{{ course.name }}</h3>
           <p v-if="course.description">{{ course.description }}</p>
-          <a :href="`/knowledge-base?course=${course.id}`">进入课程</a>
+          <a :href="appPath(`/knowledge-base?course=${course.id}`)">进入课程</a>
         </article>
       </div>
     </section>
